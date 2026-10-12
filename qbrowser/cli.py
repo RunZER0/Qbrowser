@@ -44,20 +44,34 @@ def parser() -> argparse.ArgumentParser:
 
 
 def doctor() -> int:
+    engine = os.getenv("QBROWSER_ENGINE", "native")
     print(f"Python: {sys.version.split()[0]}")
     print(f"Database folder: {home()}")
-    print(f"Agent-S executable: {os.getenv('AGENT_S_PATH') or shutil.which('agent_s') or 'NOT INSTALLED'}")
-    print(f"Tesseract: {shutil.which('tesseract') or 'NOT FOUND'}")
-    print(f"Grounding URL: {os.getenv('AGENT_S_GROUND_URL') or 'NOT CONFIGURED'}")
-    provider = os.getenv("AGENT_S_PROVIDER", "openai")
-    key = {"openai": "OPENAI_API_KEY", "anthropic": "ANTHROPIC_API_KEY",
-           "gemini": "GEMINI_API_KEY"}.get(provider)
-    print(f"Model provider: {provider}")
-    if key:
-        print(f"{key}: {'SET' if os.getenv(key) else 'NOT SET'}")
-    print("Desktop control remains disabled until you explicitly run 'qbrowser worker'.")
+    print(f"Selected engine: {engine}")
+    if engine == "native":
+        provider = os.getenv("QBROWSER_PROVIDER", "zai")
+        model = os.getenv("QBROWSER_MODEL") or {
+            "zai": "glm-5.3-flash", "deepseek": "deepseek-flash",
+        }.get(provider, "(not configured)")
+        keyname = {"zai": "ZAI_API_KEY", "deepseek": "DEEPSEEK_API_KEY",
+                   "custom": "QBROWSER_MODEL_API_KEY"}.get(provider)
+        print(f"Model: {provider} / {model}")
+        print(f"{keyname or 'Provider key'}: {'SET' if keyname and os.getenv(keyname) else 'NOT SET'}")
+        try:
+            import pyautogui
+            print(f"PyAutoGUI: installed ({getattr(pyautogui, '__version__', 'unknown')})")
+        except Exception as exc:
+            print(f"PyAutoGUI: unavailable ({type(exc).__name__})")
+        try:
+            import openai
+            print(f"OpenAI-compatible SDK: installed ({openai.__version__})")
+        except ImportError:
+            print("OpenAI-compatible SDK: NOT INSTALLED")
+    else:
+        print(f"Agent-S: {os.getenv('AGENT_S_PATH') or shutil.which('agent_s') or 'NOT INSTALLED'}")
+        print(f"Grounding URL: {os.getenv('AGENT_S_GROUND_URL') or 'NOT CONFIGURED'}")
+    print("Desktop control starts ONLY when qbrowser worker is launched.")
     return 0
-
 
 def main(argv: list[str] | None = None) -> int:
     load_local_env()

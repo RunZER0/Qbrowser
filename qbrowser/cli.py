@@ -27,7 +27,7 @@ def parser() -> argparse.ArgumentParser:
     add.add_argument("--approve-external", action="store_true",
                      help="Authorize external submissions requested in this job")
     s.add_parser("list", help="List jobs")
-    for name in ("show", "events", "requeue", "verified", "cancel", "stop", "pause",
+    for name in ("show", "events", "artifacts", "requeue", "verified", "cancel", "stop", "pause",
                  "approve-external"):
         cmd = s.add_parser(name)
         cmd.add_argument("id", help="Job ID")
@@ -118,6 +118,10 @@ def main(argv: list[str] | None = None) -> int:
         job = store.get(args.id)
     elif args.command == "events":
         print(json.dumps(store.events(args.id), indent=2, ensure_ascii=False))
+        return 0
+    elif args.command == "artifacts":
+        from qbrowser.artifacts import artifacts
+        print(json.dumps(artifacts(store, args.id), indent=2, ensure_ascii=False))
         return 0
     elif args.command == "checkpoints":
         print(json.dumps(store.checkpoints(args.id), indent=2, ensure_ascii=False))

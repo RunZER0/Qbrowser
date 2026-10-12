@@ -158,7 +158,21 @@ def worker(store: JobStore, *, once: bool = False, poll_seconds: float = 2.0):
             job = store.claim()
             if job:
                 print(f"Running {job['id']} (attempt {job['attempt']})")
-                result = execute(job, store)
+                engine = os.getenv("QBROWSER_ENGINE", "native").strip().lower()
+                if engine == "native":
+                    try:
+                        from qbrowser.native import run_native
+                        result = run_native(job, store)
+                    except KeyboardInterrupt:
+                        raise
+                    except Exception as exc:
+                        result = store.transition(job["id"], "needs_review",
+                            allowed={"running"}, error=f"Native startup failure: {type(exc).__name__}: {str(exc)[:500]}")
+                elif engine == "agent_s":
+                    result = execute(job, store)
+                else:
+                    result = store.transition(job["id"], "needs_review",
+                        allowed={"running"}, error="Unknown QBROWSER_ENGINE setting")
                 print(f"{job['id']}: {result['status']}")
             elif once:
                 return

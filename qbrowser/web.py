@@ -62,6 +62,23 @@ def job_events(job_id: str):
     return safe(lambda: store().events(job_id))
 
 
+class CheckpointUpdate(BaseModel):
+    key: str
+    state: str
+    detail: str = ""
+
+
+@app.get("/api/jobs/{job_id}/checkpoints", dependencies=[Depends(authenticate)])
+def list_checkpoints(job_id: str):
+    return safe(lambda: store().checkpoints(job_id))
+
+
+@app.put("/api/jobs/{job_id}/checkpoints", dependencies=[Depends(authenticate)])
+def update_checkpoint(job_id: str, request: CheckpointUpdate):
+    return safe(lambda: store().checkpoint(job_id, request.key,
+                                            request.state, request.detail))
+
+
 @app.post("/api/jobs/{job_id}/requeue", dependencies=[Depends(authenticate)])
 def requeue(job_id: str):
     return safe(lambda: store().transition(job_id, "queued",

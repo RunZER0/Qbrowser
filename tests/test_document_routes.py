@@ -169,3 +169,19 @@ def test_native_agent_produces_versioned_word_file_without_gui_clicks():
         assert len(documents) == 1
         assert documents[0]["filename"] == "final.docx"
         assert documents[0]["metadata"]["title"] == "Result"
+
+
+
+def test_upload_request_content_length_guard():
+    with TemporaryDirectory() as directory, patch.dict(os.environ, {
+        "QBROWSER_HOME": directory, "QBROWSER_API_TOKEN": "secret",
+    }):
+        with TestClient(app) as client:
+            headers = {"Authorization": "Bearer secret"}
+            job = client.post("/api/jobs", json={"instruction": "Test large upload"},
+                              headers=headers).json()
+            url = f"/api/jobs/{job['id']}/documents/upload/input"
+            oversized = client.post(url, files={
+                "file": ("notes.txt", io.BytesIO(b"short"), "text/plain"),
+            }, headers={**headers, "Content-Length": str(102 * 1024 * 1024)})
+            assert oversized.status_code == 413

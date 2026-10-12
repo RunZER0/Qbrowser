@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 import unittest
 
 from qbrowser.native import (
-    Desktop, ModelConfig, compact, run_native, screen_message,
+    CompatibleModel, Desktop, ModelConfig, compact, run_native, screen_message,
 )
 from qbrowser.store import JobStore
 
@@ -132,6 +132,32 @@ class NativeTests(unittest.TestCase):
                                      "QBROWSER_BASE_URL": ""}):
             with self.assertRaisesRegex(ValueError, "DEEPSEEK_API_KEY"):
                 ModelConfig.from_env()
+
+    def test_compatible_model_handles_tool_calls_and_deepseek_reasoning(self):
+        from types import SimpleNamespace
+
+        call = SimpleNamespace(
+            id="call_abc",
+            function=SimpleNamespace(name="computer_action",
+                                     arguments='{"action":"screenshot"}'),
+        )
+        msg = SimpleNamespace(content=None, tool_calls=[call],
+                              reasoning_content="unexposed reasoning")
+        sdk = MagicMock()
+        sdk.chat.completions.create.return_value = SimpleNamespace(
+            choices=[SimpleNamespace(message=msg)])
+        adapter = object.__new__(CompatibleModel)
+        adapter.config = ModelConfig("deepseek", "deepseek-flash", "placeholder",
+                                     "https://api.deepseek.com", 10, 120, 1280)
+        adapter.client = sdk
+        history = [{"role": "system", "content": "rules"}, screen_message(
+            "data:image/jpeg;base64,AA==", (1280, 720))]
+        turn = adapter.ask(history)
+        self.assertEqual(turn["calls"][0]["name"], "computer_action")
+        self.assertIn("reasoning_content", turn["assistant"])
+        sent = sdk.chat.completions.create.call_args.kwargs
+        self.assertEqual(sent["messages"][1]["content"][1]["type"], "image_url")
+        self.assertEqual(sent["tools"][0]["function"]["name"], "computer_action")
 
     def test_invalid_backend_and_non_https_remote_rejected(self):
         with patch.dict(os.environ, {"QBROWSER_PROVIDER": "custom",

@@ -69,6 +69,8 @@ or the loopback HTTP endpoints below. Do not enable an untrusted WhatsApp sender
 - POST /api/jobs with {"instruction":"...", "priority":0, "external_approved":false}
 - GET /api/jobs/{id}
 - GET /api/jobs/{id}/events
+- GET /api/jobs/{id}/checkpoints
+- PUT /api/jobs/{id}/checkpoints with {"key":"research","state":"done","detail":"Sources checked"}
 - POST /api/jobs/{id}/requeue, /verified, /cancel, /pause or /approve-external
 
 The API listens on 127.0.0.1:8765 by default. If QBROWSER_API_TOKEN is set, clients must send Authorization: Bearer <token>. Binding beyond loopback is refused unless a token is set; consider the local API a privileged control surface.
@@ -81,6 +83,8 @@ The API listens on 127.0.0.1:8765 by default. If QBROWSER_API_TOKEN is set, clie
 - needs_review: interruption, timeout or failed GUI execution; inspect the screen before requeueing.
 - completed: operator confirmed outcome.
 - paused/cancelled: no process running for this job.
+
+A planning agent can create arbitrary durable milestones using qbrowser checkpoint <id> <key> <state> "<detail>" and query them with qbrowser checkpoints <id>. Checkpoint states: pending, in_progress, done, blocked, skipped. These are generic agent-defined milestones rather than predefined website workflows.
 
 A task is never blindly retried after unknown GUI side effects. The worker obtains an OS-level exclusive lock and moves interrupted jobs to needs_review upon restart. An event journal is persisted to SQLite. This first version tracks job-level execution and outcomes; it does not resume an individual Agent-S click sequence mid-run.
 

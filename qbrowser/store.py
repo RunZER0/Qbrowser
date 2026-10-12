@@ -316,9 +316,12 @@ class JobStore:
                 raise KeyError(job_id)
             if row["status"] == "running":
                 raise ValueError("Cannot change approval during a running desktop job")
-            db.execute("UPDATE jobs SET external_approved=1, pending_approval=NULL, updated_at=? WHERE id=?",
-                       (utcnow(), job_id))
-            self._event(db, job_id, "external_approved")
+            db.execute(
+                "UPDATE jobs SET external_approved=1,pending_approval=NULL,updated_at=?, "
+                "status=CASE WHEN status='waiting_approval' THEN 'queued' ELSE status END "
+                "WHERE id=?", (utcnow(), job_id))
+            self._event(db, job_id, "external_approved",
+                        resumed=row["status"] == "waiting_approval")
             db.execute("COMMIT")
         return self.get(job_id)
 

@@ -207,6 +207,8 @@ def record_file(store: JobStore, job_id: str, filename: str, role: str,
                     db.execute("COMMIT")
                     return _decode(row)
             # Atomic snapshot. Hash filenames are immutable; identical content is deduplicated.
+            if destination.is_symlink():
+                raise ValueError("Unsafe snapshot destination")
             if not destination.exists():
                 staged = destination.with_name("." + uuid.uuid4().hex)
                 shutil.copyfile(temp, staged)
@@ -385,5 +387,18 @@ def purge_expired(store: JobStore, *, days: int, dry_run: bool = True) -> dict:
             db.execute("COMMIT")
         if not still_used:
             _vault_path(job_id, digest).unlink(missing_ok=True)
+            working = workspace(job_id) / (
+                "inputs" if item["role"] == "input" else ""
+            ) / item["filename"]
+            if working.is_file() and not working.is_symlink():
+                if _hash(working)[0] == digest:
+                    working.unlink()
+            if item["role"] == "output":
+                with store._connection() as db:
+                    try:
+                        db.execute("DELETE FROM artifacts WHERE job_id=? AND name=? AND sha256=?",
+                                   (job_id, item["filename"], digest))
+                    except sqlite3.OperationalError:
+                        pass
         deleted += 1
     return {"eligible_versions": len(selected), "deleted_versions": deleted, "dry_run": False}

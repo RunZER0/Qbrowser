@@ -98,6 +98,26 @@ def typed_source(path: Path, filename: str):
         yield local
 
 
+@router.get("/{role}/{filename}/diff")
+def diff(job_id: str, role: str, filename: str, older: int, newer: int):
+    def run():
+        import difflib
+        from qbrowser.document_engine import extract_text
+        _, left = open_snapshot(JobStore(), job_id, role, filename, older)
+        _, right = open_snapshot(JobStore(), job_id, role, filename, newer)
+        with typed_source(left, filename) as old, typed_source(right, filename) as new:
+            before = extract_text(old, limit=200000)
+            after = extract_text(new, limit=200000)
+        changes = "\n".join(difflib.unified_diff(
+            before.splitlines(), after.splitlines(),
+            fromfile=f"{filename}@v{older}", tofile=f"{filename}@v{newer}",
+            lineterm="",
+        ))
+        return {"filename": filename, "older": older, "newer": newer,
+                "unified_diff": changes[:50000], "truncated": len(changes) > 50000}
+    return _safe(run)
+
+
 @router.get("/{role}/{filename}/review")
 def review(job_id: str, role: str, filename: str, version: int | None = None):
     def run():

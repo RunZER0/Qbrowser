@@ -80,6 +80,34 @@ class StoreTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.store.checkpoint(job["id"], "../outside", "done")
 
+    def test_stop_running_job_is_persistent(self):
+        job = self.store.create("Do something")
+        running = self.store.claim()
+        self.assertFalse(running["stop_requested"])
+        result = self.store.request_stop(job["id"])
+        self.assertEqual(result["status"], "running")
+        self.assertTrue(result["stop_requested"])
+        reopened = JobStore(self.store.path)
+        self.assertTrue(reopened.get(job["id"])["stop_requested"])
+        reopened.transition(job["id"], "needs_review", allowed={"running"})
+        with self.assertRaises(ValueError):
+            reopened.request_stop(reopened.transition(
+                job["id"], "cancelled", allowed={"needs_review"})["id"])
+
+    def test_stop_queued_cancels_and_old_database_migrates(self):
+        job = self.store.create("Queue me")
+        self.assertEqual(self.store.request_stop(job["id"])["status"], "cancelled")
+        self.assertIsNone(self.store.claim())
+
+    def test_job_model_settings_survive_reopen(self):
+        job = self.store.create("Test model", engine="native", provider="deepseek",
+                                model="deepseek-flash")
+        loaded = JobStore(self.store.path).get(job["id"])
+        self.assertEqual((loaded["engine"], loaded["provider"], loaded["model"]),
+                         ("native", "deepseek", "deepseek-flash"))
+        with self.assertRaises(ValueError):
+            self.store.create("Invalid", provider="unsupported")
+
     def test_persists_between_instances(self):
         job = self.store.create("Make a document")
         reopened = JobStore(self.store.path)

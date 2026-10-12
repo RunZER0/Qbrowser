@@ -19,6 +19,11 @@ def parser() -> argparse.ArgumentParser:
     s.add_parser("init", help="Initialize the local job database")
     s.add_parser("install-openclaw", help="Install Qbrowser skill for an existing local OpenClaw agent")
     s.add_parser("doctor", help="Show local runtime prerequisites")
+    deliver = s.add_parser("deliver", help="Send verified outputs via locally paired OpenClaw WhatsApp")
+    deliver.add_argument("id")
+    deliver.add_argument("--confirm", action="store_true", help="Explicitly authorize owner delivery")
+    backup = s.add_parser("backup", help="Create a consistent SQLite database backup")
+    backup.add_argument("path", help="Destination .db path")
     add = s.add_parser("add", help="Queue a natural-language desktop job")
     add.add_argument("instruction", help="Task text, or '-' to read stdin")
     add.add_argument("--priority", type=int, default=0)
@@ -82,6 +87,11 @@ def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
     if args.command == "doctor":
         return doctor()
+    if args.command == "backup":
+        from qbrowser.backup import backup_database
+        backup_database(JobStore(), args.path)
+        print(f"Database backup created: {args.path}")
+        return 0
     if args.command == "install-openclaw":
         from pathlib import Path
         import shlex
@@ -135,6 +145,11 @@ def main(argv: list[str] | None = None) -> int:
         except (RuntimeError, KeyboardInterrupt) as exc:
             print(str(exc), file=sys.stderr)
             return 2 if isinstance(exc, RuntimeError) else 130
+        return 0
+    if args.command == "deliver":
+        from qbrowser.delivery import deliver_verified
+        print(json.dumps(deliver_verified(store, args.id, confirm=args.confirm),
+                         indent=2, ensure_ascii=False))
         return 0
     if args.command == "add":
         instruction = sys.stdin.read() if args.instruction == "-" else args.instruction

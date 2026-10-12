@@ -169,7 +169,7 @@ class CompatibleModel:
         # DeepSeek tool-calling rounds require the reasoning_content field.
         if self.config.provider == "deepseek" and getattr(message, "reasoning_content", None):
             assistant["reasoning_content"] = message.reasoning_content
-        usage = response.usage
+        usage = getattr(response, "usage", None)
         tokens = {"input": int(getattr(usage, "prompt_tokens", 0) or 0),
                   "output": int(getattr(usage, "completion_tokens", 0) or 0)}
         return {"assistant": assistant, "calls": calls, "text": message.content or "",

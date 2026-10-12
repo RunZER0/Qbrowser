@@ -18,7 +18,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: python -m pip install --upgrade pip
-      - run: python -m pip install -e ".[server,dev]"
+      - run: python -m pip install -e ".[server,documents,dev]"
       - run: python -m compileall -q qbrowser
       - run: ruff check qbrowser tests --select E9,F63,F7,F82
       - run: python -m pytest -q
@@ -36,6 +36,6 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m pip install --upgrade pip
-      - run: python -m pip install -e ".[server,native]"
+      - run: python -m pip install -e ".[server,native,documents]"
       - run: python -m pip check
       - run: python -c "import PIL, openai, pyperclip; print('Native model and clipboard libraries installed')"

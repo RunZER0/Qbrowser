@@ -8,6 +8,16 @@ The desktop operator uses normal GUI interactions (screenshots, clicks, keyboard
 
 ## Quick start
 
+The cross-platform setup script prepares a local virtual environment and installs the existing GUI agent:
+
+```bash
+python bootstrap.py
+```
+
+The script creates an editable `.env` file and does not start desktop control. Run `qbrowser doctor` after configuring the model and grounding endpoint.
+
+Alternatively, install components manually:
+
 ```bash
 python -m venv .venv
 # Windows PowerShell: .venv\Scripts\Activate.ps1

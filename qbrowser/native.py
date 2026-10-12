@@ -92,8 +92,9 @@ class ModelConfig:
     max_image_width: int
 
     @classmethod
-    def from_env(cls) -> "ModelConfig":
-        provider = os.getenv("QBROWSER_PROVIDER", "zai").strip().lower()
+    def from_env(cls, job: dict | None = None) -> "ModelConfig":
+        job = job or {}
+        provider = (job.get("provider") or os.getenv("QBROWSER_PROVIDER", "zai")).strip().lower()
         defaults = {
             "zai": ("glm-5.3-flash", "ZAI_API_KEY", "https://api.z.ai/api/paas/v4/"),
             "deepseek": ("deepseek-flash", "DEEPSEEK_API_KEY", "https://api.deepseek.com"),
@@ -102,7 +103,7 @@ class ModelConfig:
         if provider not in defaults:
             raise ValueError("QBROWSER_PROVIDER must be zai, deepseek or custom")
         default_model, key_env, base_url = defaults[provider]
-        model = os.getenv("QBROWSER_MODEL") or default_model
+        model = job.get("model") or (os.getenv("QBROWSER_MODEL") if provider == os.getenv("QBROWSER_PROVIDER", "zai") else None) or default_model
         base_url = os.getenv("QBROWSER_BASE_URL") or base_url
         key = os.getenv(key_env, "")
         if not key or not model or not base_url:
@@ -278,7 +279,7 @@ def compact(messages: list[dict], max_recent: int = 16) -> list[dict]:
 def run_native(job: dict, store: JobStore, *, model: Any | None = None,
                desktop: Any | None = None, config: ModelConfig | None = None) -> dict:
     """Execute on the worker thread, always returning a persisted outcome."""
-    config = config or ModelConfig.from_env()
+    config = config or ModelConfig.from_env(job)
     model = model or CompatibleModel(config)
     desktop = desktop or Desktop(config.max_image_width)
     started = time.monotonic()

@@ -44,7 +44,7 @@ def safe_name(name: str) -> str:
     if name in (".", "..") or name != Path(name).name or any(c in name for c in "\\/:") \
             or name.startswith(".") or any(ord(c) < 32 for c in name):
         raise ValueError("Unsafe filename")
-    if re.search(r'[<>|?*"\\x7f]', name) or name.endswith((" ", ".")):
+    if any(ch in '<>|?*"\\' or ord(ch) == 127 for ch in name) or name.endswith((" ", ".")):
         raise ValueError("Unsafe filename")
     if Path(name).suffix.lower() not in SUPPORTED:
         raise ValueError("Unsupported file extension")

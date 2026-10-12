@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import os
 import shutil
-import signal
 import subprocess
-import sys
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -107,18 +105,37 @@ def execute(job: dict, store: JobStore) -> dict:
             log.flush()
             process = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT,
                                        stdin=subprocess.DEVNULL, shell=False)
+            deadline = time.monotonic() + timeout
             try:
-                code = process.wait(timeout=timeout)
-            except subprocess.TimeoutExpired:
+                while True:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        process.terminate()
+                        try:
+                            process.wait(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            process.kill()
+                            process.wait()
+                        return store.transition(job["id"], "needs_review", allowed={"running"},
+                            error="GUI execution exceeded configured timeout; inspect desktop before retry",
+                            log_path=str(path))
+                    try:
+                        code = process.wait(timeout=min(10, remaining))
+                        break
+                    except subprocess.TimeoutExpired:
+                        log.flush()
+                        store.heartbeat(job["id"], log_bytes=path.stat().st_size)
+            except KeyboardInterrupt:
                 process.terminate()
                 try:
                     process.wait(timeout=5)
                 except subprocess.TimeoutExpired:
                     process.kill()
                     process.wait()
-                return store.transition(job["id"], "needs_review", allowed={"running"},
-                    error="GUI execution exceeded configured timeout; inspect desktop before retry",
+                store.transition(job["id"], "needs_review", allowed={"running"},
+                    error="Operator interrupted desktop task; screen state unknown",
                     log_path=str(path))
+                raise
         if code == 0:
             return store.transition(job["id"], "verify", allowed={"running"},
                 result="GUI process exited successfully. Verify actual on-screen outcome.",

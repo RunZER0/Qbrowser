@@ -21,6 +21,9 @@ def parser() -> argparse.ArgumentParser:
     add = s.add_parser("add", help="Queue a natural-language desktop job")
     add.add_argument("instruction", help="Task text, or '-' to read stdin")
     add.add_argument("--priority", type=int, default=0)
+    add.add_argument("--engine", choices=["native", "agent_s"])
+    add.add_argument("--provider", choices=["zai", "deepseek", "custom"])
+    add.add_argument("--model", help="Override the provider's default model")
     add.add_argument("--approve-external", action="store_true",
                      help="Authorize external submissions requested in this job")
     s.add_parser("list", help="List jobs")
@@ -106,7 +109,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "add":
         instruction = sys.stdin.read() if args.instruction == "-" else args.instruction
         job = store.create(instruction, priority=args.priority,
-                           external_approved=args.approve_external)
+                           external_approved=args.approve_external,
+                           engine=args.engine, provider=args.provider, model=args.model)
     elif args.command == "list":
         print(json.dumps(store.list(), indent=2, ensure_ascii=False))
         return 0

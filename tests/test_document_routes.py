@@ -22,6 +22,9 @@ def test_uploaded_file_lifecycle_and_security():
                               headers=headers).json()
             root = f"/api/jobs/{job['id']}/documents"
             assert client.get(root).status_code == 401
+            unauthenticated = client.post(root + "/upload/input",
+                files={"file": ("assignment.txt", io.BytesIO(b"private"), "text/plain")})
+            assert unauthenticated.status_code == 401
             upload = client.post(root + "/upload/input", headers=headers,
                 files={"file": ("assignment.txt", io.BytesIO(b"APA citations required."), "text/plain")})
             assert upload.status_code == 201, upload.text

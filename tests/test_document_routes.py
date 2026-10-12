@@ -124,3 +124,48 @@ def test_native_document_tool_creates_and_reads_without_gui():
             "offset": 0, "length": 200,
         })
         assert "reviewable" in read
+
+
+
+def test_native_agent_produces_versioned_word_file_without_gui_clicks():
+    """Full fake-model agent loop → document_action → persisted output → review state."""
+    from qbrowser.native import run_native, ModelConfig
+    from qbrowser.artifact_vault import list_revisions
+
+    class FakeDesktop:
+        def observe(self):
+            return "data:image/jpeg;base64,ZHVtbXk=", (1280, 720)
+
+    class FakeModel:
+        turns = 0
+        def ask(self, messages):
+            self.turns += 1
+            if self.turns == 1:
+                op, args = "document_action", {"operation": "create",
+                    "filename": "final.docx",
+                    "data": {"title": "Result", "blocks": [
+                        {"type": "paragraph", "text": "A real Word file produced by the agent."}
+                    ]}}
+            else:
+                op, args = "finish_task", {"result": "Word file produced",
+                                           "evidence": "Saved via managed document tool"}
+            import json
+            return {"calls": [{"id": "call" + str(self.turns), "name": op, "args": args}],
+                    "assistant": {"role": "assistant", "content": None,
+                                  "tool_calls": [{"id": "call" + str(self.turns),
+                                    "type": "function", "function": {
+                                        "name": op, "arguments": json.dumps(args)}}]},
+                    "usage": {"input": 100, "output": 30}}
+
+    with TemporaryDirectory() as directory, patch.dict(os.environ, {"QBROWSER_HOME": directory}):
+        store = JobStore(f"{directory}/state.db")
+        task = store.create("Generate Word document")
+        claimed = store.claim()
+        config = ModelConfig("zai", "glm-5.3-flash", "fake", "https://example.com", 5, 120, 1280)
+        state = run_native(claimed, store, model=FakeModel(), desktop=FakeDesktop(),
+                           config=config)
+        assert state["status"] == "verify"
+        documents = list_revisions(store, task["id"], role="output")
+        assert len(documents) == 1
+        assert documents[0]["filename"] == "final.docx"
+        assert documents[0]["metadata"]["title"] == "Result"

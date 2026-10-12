@@ -284,9 +284,13 @@ def run_native(job: dict, store: JobStore, *, model: Any | None = None,
     desktop = desktop or Desktop(config.max_image_width)
     started = time.monotonic()
     instruction = job["instruction"]
+    from qbrowser.artifacts import workspace
+    output_dir = workspace(job["id"])
     policy = "Owner explicitly approved external actions for this job." if job["external_approved"] else (
         "Owner HAS NOT approved external actions for this job.")
-    system = SYSTEM + "\n" + GUARD + "\n" + policy
+    system = (SYSTEM + "\n" + GUARD + "\n" + policy +
+              "\nWhen creating a document or file, save the final output in " + str(output_dir) +
+              ". Do not assume it was saved until verified on the screen.")
     history = [
         {"role": "system", "content": system},
         {"role": "user", "content": "User task: " + instruction},

@@ -177,7 +177,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     elif args.command == "requeue":
         job = store.transition(args.id, "queued",
-              allowed={"needs_review", "paused", "waiting_approval", "failed"})
+              allowed={"needs_review", "paused", "failed"})
     elif args.command == "verified":
         job = store.transition(args.id, "completed", allowed={"verify"},
                                result="Operator verified the final outcome")

@@ -32,6 +32,10 @@ Legend: **REUSE** = adopt maintained implementation; **ADAPT** = integrate or ta
 | 24 | Security threat model | Prompt injection, malicious pages, unsafe clicks, exfiltration, isolate user profiles | REUSE published computer-use guidance; BUILD policy | Security review with hostile website test |
 | 25 | Production operations | Backup/restore, log rotation, diagnostics, hardware/network failure, upgrades | BUILD | Multi-day unattended reliability trial |
 
+## Section 14 implementation
+
+The document/artifact subsystem now includes input upload and output discovery, bounded format inspection, DOCX/PDF/XLSX/PPTX generators, text/CSV conversion, immutable hash snapshots, parent revision lineage, quality issue reports, authenticated previews/downloads and opt-in retention. See [documents](DOCUMENTS.md) for the exact supported conversion/preview matrix. Office layout-preserving PDF conversion and factual source existence verification remain separate GUI/research workflows.
+
 ## Current implementation evidence
 
 **Completed in code and simulated tests:** native multimodal action adapter; dynamic milestones; SQLite WAL task journal and model-token usage; exclusive desktop lease; bounded context, steps and wall-clock; stop-before-action checks for declared external operations; persisted approval and wait/wake states; per-job output hashing; cooperative cancellation; optional owner-confirmed WhatsApp file delivery; SQLite online backup; random default local API authentication token; a provider image/tool-call smoke probe and a local screenshot/DPI smoke probe.

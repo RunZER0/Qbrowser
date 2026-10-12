@@ -23,7 +23,7 @@ def index_outputs(store: JobStore, job_id: str) -> list[dict]:
     """Index ordinary files only. Symlinks are excluded to avoid indexing outside data."""
     store.get(job_id)
     root = workspace(job_id).resolve()
-    files = sorted(root.rglob("*"))
+    files = sorted(p for p in root.iterdir() if p.is_file() and not p.name.startswith("."))
     if len(files) > MAX_FILES * 5:
         raise ValueError("Workspace contains excessive entries")
     found: list[dict] = []

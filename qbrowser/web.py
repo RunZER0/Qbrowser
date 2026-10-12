@@ -6,14 +6,36 @@ import os
 import secrets
 
 from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi.responses import Response
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 from qbrowser.config import load_local_env
 from qbrowser.store import JobStore
+from qbrowser.document_routes import router as document_router
 
 load_local_env()
 app = FastAPI(title="Qbrowser", version="0.1.0", docs_url="/docs")
+
+
+@app.middleware("http")
+async def document_upload_size_guard(request, call_next):
+    if request.method == "POST" and "/documents/upload/" in request.url.path:
+        token = os.getenv("QBROWSER_API_TOKEN")
+        if token and not secrets.compare_digest(
+            request.headers.get("authorization", ""), f"Bearer {token}"
+        ):
+            return Response(status_code=401, content="Bearer token required")
+        raw = request.headers.get("content-length")
+        if raw is None:
+            return Response(status_code=411, content="Content-Length is required for uploads")
+        try:
+            size = int(raw)
+        except ValueError:
+            return Response(status_code=400, content="Invalid Content-Length")
+        if size > 101 * 1024 * 1024:
+            return Response(status_code=413, content="Document upload exceeds 100 MB")
+    return await call_next(request)
 
 
 def authenticate(authorization: str | None = Header(default=None)):
@@ -25,6 +47,8 @@ def authenticate(authorization: str | None = Header(default=None)):
 def store() -> JobStore:
     return JobStore()
 
+
+app.include_router(document_router, dependencies=[Depends(authenticate)])
 
 class NewJob(BaseModel):
     instruction: str = Field(min_length=1, max_length=50000)
@@ -200,11 +224,8 @@ async function refresh(){
       alert(stages.length?JSON.stringify(stages,null,2):'No milestones recorded');}
     catch(e){$('error').textContent=e.message;}
    };bar.append(stages);
-   const artifacts=el('button','Files');artifacts.onclick=async()=>{
-    try{let data=await api('/api/jobs/'+j.id+'/artifacts');
-     alert(data.length?JSON.stringify(data,null,2):'No output files indexed yet');}
-    catch(e){$('error').textContent=e.message;}
-   };bar.append(artifacts);
+   const files=el('button','Documents');files.onclick=()=>showDocuments(j.id,card);
+   bar.append(files);
    const log=el('button','Events');log.onclick=async()=>{
     try{let events=await api('/api/jobs/'+j.id+'/events');alert(JSON.stringify(events,null,2));}
     catch(e){$('error').textContent=e.message;}
@@ -219,6 +240,85 @@ $('submit').onclick=async()=>{
  $('instruction').value='';$('approve').checked=false;await refresh();}
  catch(e){$('error').textContent=e.message;}
 };
+async function rawRequest(path, method='GET', body){
+ const token=$('token').value;
+ const response=await fetch(path,{method,headers:{...(token?{'Authorization':'Bearer '+token}:{})},body});
+ if(!response.ok){let e=await response.json().catch(()=>({detail:response.statusText}));throw Error(e.detail||response.statusText);}
+ return response;
+}
+function documentUrl(id,role,name,action,version){
+ return '/api/jobs/'+id+'/documents/'+role+'/'+encodeURIComponent(name)+'/'+action+(version?'?version='+version:'');
+}
+async function showDocuments(id,card){
+ const prev=card.querySelector('.document-list');if(prev)prev.remove();
+ const panel=el('section',undefined,'panel document-list');
+ const header=el('h3','Documents and versions');panel.append(header);
+ const uploader=el('input');uploader.type='file';uploader.accept='.pdf,.docx,.xlsx,.pptx,.md,.txt,.csv,.png,.jpg,.jpeg';
+ const role=el('select');for(const type of ['input','output']){
+  const o=el('option',type);o.value=type;role.append(o);
+ }
+ const uploadBtn=el('button','Upload file');
+ uploadBtn.onclick=async()=>{
+  if(!uploader.files.length)return;
+  try{
+   const form=new FormData();form.append('file',uploader.files[0]);
+   const response=await rawRequest('/api/jobs/'+id+'/documents/upload/'+role.value,'POST',form);
+   await response.json();await showDocuments(id,card);
+  }catch(e){$('error').textContent=e.message;}
+ };
+ panel.append(role,uploader,uploadBtn);
+ const data=await api('/api/jobs/'+id+'/documents');
+ for(const f of data){
+  const line=el('div',undefined,'row');
+  line.style.margin='8px 0';
+  line.append(el('small',f.role+' · '+f.filename+' · v'+f.version+(f.deleted_at?' · expired':'')));
+  if(!f.deleted_at){
+   const down=el('button','Download');
+   down.onclick=async()=>{
+    try{
+     const response=await rawRequest(documentUrl(id,f.role,f.filename,'download',f.version));
+     const blob=await response.blob();const href=URL.createObjectURL(blob);
+     const a=el('a');a.href=href;a.download=f.filename;a.click();setTimeout(()=>URL.revokeObjectURL(href),1000);
+    }catch(e){$('error').textContent=e.message;}
+   };
+   const view=el('button','Preview');
+   view.onclick=async()=>{
+    try{
+     const response=await rawRequest(documentUrl(id,f.role,f.filename,'preview',f.version));
+     const blob=await response.blob();const href=URL.createObjectURL(blob);window.open(href,'_blank','noopener');
+     setTimeout(()=>URL.revokeObjectURL(href),60000);
+    }catch(e){$('error').textContent=e.message;}
+   };
+   const review=el('button','QA');
+   review.onclick=async()=>{try{
+    const result=await api(documentUrl(id,f.role,f.filename,'review',f.version));
+    alert(JSON.stringify(result.analysis,null,2));
+   }catch(e){$('error').textContent=e.message;}};
+   line.append(view,down,review);
+   if(f.version>1){
+    const compare=el('button','Compare v'+(f.version-1));
+    compare.onclick=async()=>{try{
+     const url='/api/jobs/'+id+'/documents/'+f.role+'/'+encodeURIComponent(f.filename)+'/diff?older='+(f.version-1)+'&newer='+f.version;
+     const result=await api(url);alert(result.unified_diff||'No text changes');
+    }catch(e){$('error').textContent=e.message;}};
+    line.append(compare);
+   }
+  }
+  panel.append(line);
+ }
+ const generate=el('button','Create from JSON');
+ generate.onclick=async()=>{
+  const filename=prompt('Output filename (.docx, .pdf, .xlsx, .pptx, .txt, .md):');
+  if(!filename)return;
+  const input=prompt('JSON document data (blocks / sheets / slides):');
+  if(!input)return;
+  try{
+   await api('/api/jobs/'+id+'/documents/generate','POST',{filename,data:JSON.parse(input)});
+   await showDocuments(id,card);
+  }catch(e){$('error').textContent=e.message;}
+ };
+ panel.append(generate);card.append(panel);
+}
 $('refresh').onclick=refresh;setInterval(refresh,5000);refresh();
 </script></body></html>"""
 

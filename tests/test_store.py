@@ -108,6 +108,28 @@ class StoreTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.store.create("Invalid", provider="unsupported")
 
+    def test_wait_wakes_after_due_without_replaying_clicks(self):
+        job = self.store.create("Wait for website report")
+        self.store.claim()
+        due = self.store.wait_for(job["id"], 60, "Check report later")
+        self.assertEqual(due["status"], "waiting")
+        self.assertIsNone(self.store.claim())
+        self.assertEqual(self.store.wake_due(), 0)
+        with self.store._connection() as db:
+            db.execute("UPDATE jobs SET wake_at=? WHERE id=?",
+                       ("2000-01-01T00:00:00+00:00", job["id"]))
+        self.assertEqual(self.store.wake_due(), 1)
+        self.assertEqual(self.store.claim()["attempt"], 2)
+
+    def test_usage_is_transactional_and_nonnegative(self):
+        job = self.store.create("Model job")
+        self.store.claim()
+        self.store.record_usage(job["id"], 120, 30)
+        usage = self.store.record_usage(job["id"], 22, 8)
+        self.assertEqual((usage["input_tokens"], usage["output_tokens"]), (142,38))
+        with self.assertRaises(ValueError):
+            self.store.record_usage(job["id"], -1, 1)
+
     def test_persists_between_instances(self):
         job = self.store.create("Make a document")
         reopened = JobStore(self.store.path)

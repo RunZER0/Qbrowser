@@ -175,3 +175,48 @@ def test_expired_versions_retain_metadata(setup_job):
     assert get_revision(store, job, "output", "old.txt")["deleted_at"]
     with pytest.raises(KeyError):
         open_snapshot(store, job, "output", "old.txt")
+
+
+def test_reference_checks_detect_unmatched_authors(setup_job):
+    store, job, _ = setup_job
+    item = create_output(store, job, "references.docx", {
+        "blocks": [
+            {"type": "paragraph", "text": "The claim appears (Smith, 2020) and (Brown, 2021)."},
+            {"type": "heading", "text": "References"},
+            {"type": "paragraph", "text": "Smith, J. (2020). A relevant article."},
+        ]})
+    codes = {issue["code"] for issue in item["qa"]}
+    assert "unmatched_citations" in codes
+    assert item["metadata"]["unmatched_citations"] == ["Brown (2021)"]
+    assert item["metadata"]["source_verification"].startswith("internal_consistency")
+
+
+def test_retention_removes_local_working_copy(setup_job):
+    store, job, root = setup_job
+    create_output(store, job, "outdated.txt", {"text": "Old working copy"})
+    working = root / "workspaces" / job / "outdated.txt"
+    assert working.exists()
+    with store._connection() as db:
+        db.execute("UPDATE document_revisions SET created_at=? WHERE job_id=?",
+                   ("2000-01-01T00:00:00+00:00", job))
+        db.execute("UPDATE jobs SET status='completed' WHERE id=?", (job,))
+    purge_expired(store, days=7, dry_run=False)
+    assert not working.exists()
+    assert get_revision(store, job, "output", "outdated.txt")["deleted_at"] is not None
+
+
+def test_wrong_format_upload_rejected(setup_job):
+    store, job, _ = setup_job
+    with pytest.raises(ValueError):
+        record_file(store, job, "document.docx", "input", io.BytesIO(b"plain text disguised"))
+
+
+def test_internal_reference_check_does_not_claim_external_verification(setup_job):
+    store, job, _ = setup_job
+    item = create_output(store, job, "sources.txt", {"text": (
+        "Discussion cites (Adams, 2018).\n\nReferences\nAdams, P. (2018). "
+        "A publication. https://doi.org/10.1234/example"
+    )})
+    assert item["metadata"]["unmatched_citations"] == []
+    assert item["metadata"]["source_verification"] != "verified"
+    assert item["metadata"]["reference_urls"]

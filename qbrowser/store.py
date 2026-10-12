@@ -94,6 +94,8 @@ class JobStore:
             for field in ("input_tokens", "output_tokens"):
                 if field not in existing:
                     db.execute(f"ALTER TABLE jobs ADD COLUMN {field} INTEGER NOT NULL DEFAULT 0")
+            from qbrowser.migrations import migrate
+            migrate(db)
 
     @staticmethod
     def _job(row: sqlite3.Row) -> dict[str, Any]:
@@ -343,12 +345,24 @@ class JobStore:
             if row["status"] in FINAL:
                 raise ValueError("Cannot change checkpoints on a finished job")
             stamp = utcnow()
+            previous = db.execute(
+                "SELECT state FROM checkpoints WHERE job_id=? AND key=?",
+                (job_id, key),
+            ).fetchone()
             db.execute("""
                 INSERT INTO checkpoints(job_id,key,state,detail,updated_at)
                 VALUES(?,?,?,?,?)
                 ON CONFLICT(job_id,key) DO UPDATE SET state=excluded.state,
                     detail=excluded.detail,updated_at=excluded.updated_at
                 """, (job_id, key, state, detail, stamp))
+            db.execute(
+                """INSERT INTO subtask_history
+                   (job_id,attempt,key,from_state,to_state,detail,occurred_at)
+                   VALUES(?,?,?,?,?,?,?)""",
+                (job_id, row["attempt"] if "attempt" in row.keys() else
+                 db.execute("SELECT attempt FROM jobs WHERE id=?", (job_id,)).fetchone()[0],
+                 key, previous["state"] if previous else None, state, detail, stamp),
+            )
             self._event(db, job_id, "checkpoint", key=key, state=state, detail=detail)
             db.execute("COMMIT")
         return {"job_id": job_id, "key": key, "state": state,
@@ -376,16 +390,42 @@ class JobStore:
             db.execute("COMMIT")
 
     def recover_interrupted(self) -> int:
-        """Do not replay interrupted GUI actions automatically."""
+        """Requeue only observational attempts; ambiguous GUI side effects need review.
+
+        This is an explicitly safe subset of Temporal-like workflow recovery:
+        the current screen is re-inspected, with no recorded input ever replayed.
+        """
+        from qbrowser.durable import ActionJournal
+
+        decisions = ActionJournal(self)
         with self._connection() as db:
             db.execute("BEGIN IMMEDIATE")
-            rows = db.execute("SELECT id FROM jobs WHERE status='running'").fetchall()
+            rows = db.execute(
+                """SELECT id,attempt,engine,external_approved,stop_requested
+                   FROM jobs WHERE status='running'"""
+            ).fetchall()
             for row in rows:
-                db.execute(
-                    "UPDATE jobs SET status='needs_review', updated_at=?, last_error=? WHERE id=?",
-                    (utcnow(), "Worker stopped before outcome verification", row["id"]),
+                # Agent-S remains opaque to Qbrowser; never assume its side effects.
+                backend = row["engine"] or os.getenv("QBROWSER_ENGINE", "native")
+                safe, explanation = decisions.recovery_decision(
+                    row["id"], row["attempt"]
                 )
-                self._event(db, row["id"], "interrupted",
-                            reason="Desktop state unknown; operator review required")
+                can_resume = (
+                    backend == "native" and safe
+                    and not row["external_approved"] and not row["stop_requested"]
+                )
+                target = "queued" if can_resume else "needs_review"
+                description = (
+                    "Recovered safely: " + explanation
+                    if can_resume else "Interrupted GUI work requires owner review: " + explanation
+                )
+                db.execute(
+                    """UPDATE jobs SET status=?,updated_at=?,last_error=? WHERE id=?""",
+                    (target, utcnow(), description, row["id"]),
+                )
+                self._event(
+                    db, row["id"], "interrupted",
+                    reason=description, auto_queued=can_resume,
+                )
             db.execute("COMMIT")
         return len(rows)

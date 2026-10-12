@@ -421,6 +421,58 @@ def inspect_document(path: Path) -> dict:
     return info
 
 
+def preview_html(path: Path) -> str:
+    """Sanitized, semantic HTML previews; original Office page layout is not simulated."""
+    import html
+    def e(value):
+        return html.escape(str(value), quote=True)
+
+    ext = path.suffix.lower()
+    if ext in (".txt", ".md", ".csv"):
+        return "<pre>" + e(extract_text(path, limit=50000)) + "</pre>"
+    if ext == ".docx":
+        from docx import Document
+        doc = Document(path)
+        blocks = []
+        for p in doc.paragraphs[:300]:
+            if not p.text.strip():
+                continue
+            tag = "h2" if p.style and p.style.name.lower().startswith("heading") else "p"
+            blocks.append(f"<{tag}>{e(p.text[:3000])}</{tag}>")
+        for table in doc.tables[:15]:
+            rows = []
+            for row in table.rows[:50]:
+                rows.append("<tr>" + "".join(f"<td>{e(cell.text[:1000])}</td>" for cell in row.cells[:20]) + "</tr>")
+            blocks.append("<table border='1' cellpadding='5'>" + "".join(rows) + "</table>")
+        return "".join(blocks) or "<p>No visible text extracted.</p>"
+    if ext == ".xlsx":
+        from openpyxl import load_workbook
+        wb = load_workbook(path, data_only=True, read_only=True)
+        try:
+            sections = []
+            for sheet in wb.worksheets[:8]:
+                rows = []
+                for row in sheet.iter_rows(max_row=100, max_col=25, values_only=True):
+                    rows.append("<tr>" + "".join(f"<td>{e(val if val is not None else '')[:600]}</td>" for val in row) + "</tr>")
+                sections.append(f"<section><h2>{e(sheet.title)}</h2><table border='1' cellpadding='5'>"
+                                + "".join(rows) + "</table></section>")
+            return "".join(sections)
+        finally:
+            wb.close()
+    if ext == ".pptx":
+        from pptx import Presentation
+        prs = Presentation(path)
+        sections = []
+        for number, slide in enumerate(list(prs.slides)[:30], 1):
+            pieces = [f"<section><h2>Slide {number}</h2>"]
+            for shape in slide.shapes:
+                if shape.has_text_frame and shape.text.strip():
+                    pieces.append(f"<p>{e(shape.text[:5000])}</p>")
+            sections.append("".join(pieces) + "</section>")
+        return "".join(sections)
+    raise ValueError("HTML preview unavailable for this document type")
+
+
 def preview_png(path: Path, *, page: int = 0) -> bytes:
     """Real page preview for PDFs; thumbnail for images. No invented document rendering."""
     from PIL import Image

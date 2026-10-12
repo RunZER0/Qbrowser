@@ -191,8 +191,10 @@ def worker(store: JobStore, *, once: bool = False, poll_seconds: float = 2.0):
                     result = store.transition(job["id"], "needs_review",
                         allowed={"running"}, error="Unknown QBROWSER_ENGINE setting")
                 from qbrowser.artifacts import index_outputs
+                from qbrowser.artifact_vault import sync_outputs
                 try:
                     indexed = index_outputs(store, job["id"])
+                    sync_outputs(store, job["id"])
                     if indexed:
                         print(f"{job['id']}: indexed {len(indexed)} output file(s)")
                 except (OSError, ValueError) as exc:

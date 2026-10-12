@@ -158,7 +158,7 @@ def worker(store: JobStore, *, once: bool = False, poll_seconds: float = 2.0):
             job = store.claim()
             if job:
                 print(f"Running {job['id']} (attempt {job['attempt']})")
-                engine = os.getenv("QBROWSER_ENGINE", "native").strip().lower()
+                engine = (job.get("engine") or os.getenv("QBROWSER_ENGINE", "native")).strip().lower()
                 if engine == "native":
                     try:
                         from qbrowser.native import run_native

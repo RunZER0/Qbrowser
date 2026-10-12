@@ -32,11 +32,19 @@ Legend: **REUSE** = adopt maintained implementation; **ADAPT** = integrate or ta
 | 24 | Security threat model | Prompt injection, malicious pages, unsafe clicks, exfiltration, isolate user profiles | REUSE published computer-use guidance; BUILD policy | Security review with hostile website test |
 | 25 | Production operations | Backup/restore, log rotation, diagnostics, hardware/network failure, upgrades | BUILD | Multi-day unattended reliability trial |
 
+## Current implementation evidence
+
+**Implemented in repository (cloud-tested):** workstreams 02 (OpenAI-compatible screenshot+tool protocol), 03 (PyAutoGUI action adapter, screenshot resizing and high-DPI mapping), 05 (dynamic progress records and model observe/act loop), 06 (bounded action history and duration), 07–09 (SQLite, crash review, exclusive worker), 12 (workboard with per-job model choice), 14 (workspace + hashed outputs), 16 (events and heartbeats), 17 (cooperative stop), and automated portions of 18–19.
+
+**Available as local adapters:** 01 (native engine and Agent-S selection), 04 (GUI through existing toolkit), 13 (OpenClaw skill installer). Live provider responses, actual OS GUI control and WhatsApp account authentication are NOT certified by cloud tests.
+
+**Not release-complete:** high-assurance consequential-action interception, independently verified task outcomes, provider budget metering, automatic external wait/wake scheduling, reliable customer delivery, backup/restore, security assessment, multi-OS E2E smoke matrix and multi-day endurance testing. These remain acceptance gates, despite the code being ready for local installation.
+
 ## Release phases
 
 **Phase A — foundation:** durable store, state machine, events, CLI, dashboard, exclusive worker, bootstrap and CI. Previously implemented. Must inspect and retain.
 
-**Phase B — native multimodal engine:** GLM / DeepSeek provider integration, screenshot-action protocol, bounded history and execution, model selection, policy guardrails, simulation tests. Active in this implementation.
+**Phase B — native multimodal engine:** implemented and cloud-tested at protocol/simulator level; real-provider and desktop usability tests remain.
 
 **Phase C — hardened local operator:** reliable cancellation, evidence and artifacts, interruptions, per-job constraints, dashboard control, installation documentation. Target for this implementation as time permits.
 

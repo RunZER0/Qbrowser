@@ -355,6 +355,9 @@ def run_native(job: dict, store: JobStore, *, model: Any | None = None,
             if used["input_tokens"] + used["output_tokens"] > config.max_total_tokens:
                 return store.transition(job["id"], "needs_review", allowed={"running"},
                     error="Model token budget exceeded; execution stopped before another GUI action")
+            if time.monotonic() - started >= config.max_seconds:
+                return store.transition(job["id"], "needs_review", allowed={"running"},
+                    error="Model call exhausted time budget before GUI action")
             if store.get(job["id"])["stop_requested"]:
                 return store.transition(job["id"], "needs_review", allowed={"running"},
                                         error="Stop requested during model inference; no further action executed")

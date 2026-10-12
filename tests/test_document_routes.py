@@ -68,6 +68,10 @@ def test_generated_file_preview_review_versions():
                     {"type": "paragraph", "text": "Final version."}
                 ]}}, headers=headers)
             assert again.json()["version"] == 2
+            diff = client.get(url + "/output/analysis.docx/diff?older=1&newer=2",
+                              headers=headers)
+            assert diff.status_code == 200, diff.text
+            assert "Final version." in diff.json()["unified_diff"]
             first = client.get(url + "/output/analysis.docx/download?version=1", headers=headers)
             assert first.status_code == 200
             assert first.content != client.get(url + "/output/analysis.docx/download?version=2",

@@ -115,7 +115,7 @@ The API listens on 127.0.0.1:8765. Optionally set QBROWSER_API_TOKEN for bearer 
 
 Set QBROWSER_ENGINE=agent_s and configure its model/API credentials plus AGENT_S_GROUND_URL, AGENT_S_GROUND_MODEL and resolution. The existing upstream Agent-S CLI implements its screenshot/action loop. The native engine does NOT require the grounding endpoint.
 
-For OpenClaw/WhatsApp, integrate the provided examples/openclaw/SKILL.md skill on the owner-controlled machine. This repository does not itself receive WhatsApp messages; a connected message channel and authenticated owner sender are separate setup tasks.
+For OpenClaw/WhatsApp, install OpenClaw separately, pair your account using the official OpenClaw WhatsApp setup, then run `qbrowser install-openclaw` inside the Qbrowser environment. This writes an owner-gated local skill to `~/.openclaw/workspace/skills/qbrowser/SKILL.md` pointing to the current Python interpreter. Restart or reload OpenClaw to discover the skill. This repository does not itself receive WhatsApp messages; the messaging channel and allowlisted owner are still separate setup tasks.
 
 ## Acceptance testing
 

@@ -40,6 +40,16 @@ class APITests(unittest.TestCase):
         self.assertEqual(self.client.post(f"/api/jobs/{ident}/verified",
                                          headers=self.headers).status_code, 409)
 
+    def test_persist_checkpoints_via_http(self):
+        job = self.client.post("/api/jobs", json={"instruction": "Carry out an unknown task"},
+                               headers=self.headers).json()
+        path = f"/api/jobs/{job['id']}/checkpoints"
+        r = self.client.put(path, json={"key": "source_review", "state": "done",
+                                         "detail": "Checked references"},
+                            headers=self.headers)
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(self.client.get(path, headers=self.headers).json()[0]["state"], "done")
+
     def test_unsafe_state_rejected(self):
         response = self.client.post("/api/jobs", json={"instruction": "Process documents"},
                                     headers=self.headers)

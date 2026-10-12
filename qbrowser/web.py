@@ -62,6 +62,23 @@ def job_events(job_id: str):
     return safe(lambda: store().events(job_id))
 
 
+class CheckpointUpdate(BaseModel):
+    key: str
+    state: str
+    detail: str = ""
+
+
+@app.get("/api/jobs/{job_id}/checkpoints", dependencies=[Depends(authenticate)])
+def list_checkpoints(job_id: str):
+    return safe(lambda: store().checkpoints(job_id))
+
+
+@app.put("/api/jobs/{job_id}/checkpoints", dependencies=[Depends(authenticate)])
+def update_checkpoint(job_id: str, request: CheckpointUpdate):
+    return safe(lambda: store().checkpoint(job_id, request.key,
+                                            request.state, request.detail))
+
+
 @app.post("/api/jobs/{job_id}/requeue", dependencies=[Depends(authenticate)])
 def requeue(job_id: str):
     return safe(lambda: store().transition(job_id, "queued",
@@ -156,6 +173,11 @@ async function refresh(){
     :j.status==='queued'?[['pause','Pause'],['cancel','Cancel']]:[];
    if(!j.external_approved&&j.status!=='running')actions.push(['approve-external','Approve external actions']);
    for(const [k,v] of actions){const b=el('button',v);b.onclick=()=>action(k,j.id,v);bar.append(b);}
+   const stages=el('button','Milestones');stages.onclick=async()=>{
+    try{const stages=await api('/api/jobs/'+j.id+'/checkpoints');
+      alert(stages.length?JSON.stringify(stages,null,2):'No milestones recorded');}
+    catch(e){$('error').textContent=e.message;}
+   };bar.append(stages);
    const log=el('button','Events');log.onclick=async()=>{
     try{let events=await api('/api/jobs/'+j.id+'/events');alert(JSON.stringify(events,null,2));}
     catch(e){$('error').textContent=e.message;}

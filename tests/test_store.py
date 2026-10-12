@@ -66,6 +66,20 @@ class StoreTests(unittest.TestCase):
         self.store.recover_interrupted()
         self.assertTrue(self.store.approve_external(job["id"])["external_approved"])
 
+    def test_dynamic_checkpoints_survive_restart(self):
+        job = self.store.create("Any unfamiliar task")
+        self.store.checkpoint(job["id"], "research", "in_progress", "Searching sources")
+        self.store.checkpoint(job["id"], "research", "done", "Five verified sources")
+        self.store.checkpoint(job["id"], "draft", "blocked", "Needs clarification")
+        reopened = JobStore(self.store.path)
+        states = {x["key"]: x["state"] for x in reopened.checkpoints(job["id"])}
+        self.assertEqual(states, {"research": "done", "draft": "blocked"})
+        self.assertIn("checkpoint", [e["type"] for e in reopened.events(job["id"])])
+        with self.assertRaises(ValueError):
+            self.store.checkpoint(job["id"], "review", "invalid")
+        with self.assertRaises(ValueError):
+            self.store.checkpoint(job["id"], "../outside", "done")
+
     def test_persists_between_instances(self):
         job = self.store.create("Make a document")
         reopened = JobStore(self.store.path)

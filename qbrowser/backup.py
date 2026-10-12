@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 from qbrowser.store import JobStore
@@ -17,9 +18,8 @@ def backup_database(store: JobStore, destination: str | Path) -> Path:
         raise FileExistsError("Refusing to replace an existing backup")
     target.parent.mkdir(parents=True, exist_ok=True)
     try:
-        with sqlite3.connect(store.path) as source, sqlite3.connect(target) as result:
+        with closing(sqlite3.connect(store.path)) as source, closing(sqlite3.connect(target)) as result:
             source.backup(result)
-            result.execute("PRAGMA quick_check")
             validation = result.execute("PRAGMA quick_check").fetchone()[0]
             if validation != "ok":
                 raise RuntimeError(f"Backup integrity check failed: {validation}")

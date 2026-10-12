@@ -173,6 +173,11 @@ async function refresh(){
     :j.status==='queued'?[['pause','Pause'],['cancel','Cancel']]:[];
    if(!j.external_approved&&j.status!=='running')actions.push(['approve-external','Approve external actions']);
    for(const [k,v] of actions){const b=el('button',v);b.onclick=()=>action(k,j.id,v);bar.append(b);}
+   const stages=el('button','Milestones');stages.onclick=async()=>{
+    try{const stages=await api('/api/jobs/'+j.id+'/checkpoints');
+      alert(stages.length?JSON.stringify(stages,null,2):'No milestones recorded');}
+    catch(e){$('error').textContent=e.message;}
+   };bar.append(stages);
    const log=el('button','Events');log.onclick=async()=>{
     try{let events=await api('/api/jobs/'+j.id+'/events');alert(JSON.stringify(events,null,2));}
     catch(e){$('error').textContent=e.message;}

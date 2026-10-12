@@ -61,6 +61,12 @@ def get_job(job_id: str):
     return safe(lambda: store().get(job_id))
 
 
+@app.get("/api/jobs/{job_id}/artifacts", dependencies=[Depends(authenticate)])
+def job_artifacts(job_id: str):
+    from qbrowser.artifacts import artifacts
+    return safe(lambda: artifacts(store(), job_id))
+
+
 @app.get("/api/jobs/{job_id}/events", dependencies=[Depends(authenticate)])
 def job_events(job_id: str):
     return safe(lambda: store().events(job_id))
@@ -194,6 +200,11 @@ async function refresh(){
       alert(stages.length?JSON.stringify(stages,null,2):'No milestones recorded');}
     catch(e){$('error').textContent=e.message;}
    };bar.append(stages);
+   const artifacts=el('button','Files');artifacts.onclick=async()=>{
+    try{let data=await api('/api/jobs/'+j.id+'/artifacts');
+     alert(data.length?JSON.stringify(data,null,2):'No output files indexed yet');}
+    catch(e){$('error').textContent=e.message;}
+   };bar.append(artifacts);
    const log=el('button','Events');log.onclick=async()=>{
     try{let events=await api('/api/jobs/'+j.id+'/events');alert(JSON.stringify(events,null,2));}
     catch(e){$('error').textContent=e.message;}

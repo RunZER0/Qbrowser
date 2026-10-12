@@ -119,7 +119,7 @@ def validate_file(path: Path, filename: str) -> dict:
                 parts = Path(info.filename).parts
                 if info.filename.startswith("/") or ".." in parts or "\\" in info.filename:
                     raise ValueError("Unsafe internal Office path")
-                if info.filename.lower().endswith((".bin", ".exe", ".dll", ".js", ".vbs")):
+                if info.filename.lower().endswith((".exe", ".dll", ".js", ".vbs", "vbaproject.bin")) or "/activex/" in info.filename.lower() or "/embeddings/" in info.filename.lower():
                     raise ValueError("Executable content in document package")
             names = set(zf.namelist())
             if "[Content_Types].xml" not in names or OOXML_REQUIRED[extension] not in names:

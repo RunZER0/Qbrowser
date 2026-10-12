@@ -274,6 +274,14 @@ async function showDocuments(id,card){
     alert(JSON.stringify(result.analysis,null,2));
    }catch(e){$('error').textContent=e.message;}};
    line.append(view,down,review);
+   if(f.version>1){
+    const compare=el('button','Compare v'+(f.version-1));
+    compare.onclick=async()=>{try{
+     const url='/api/jobs/'+id+'/documents/'+f.role+'/'+encodeURIComponent(f.filename)+'/diff?older='+(f.version-1)+'&newer='+f.version;
+     const result=await api(url);alert(result.unified_diff||'No text changes');
+    }catch(e){$('error').textContent=e.message;}};
+    line.append(compare);
+   }
   }
   panel.append(line);
  }

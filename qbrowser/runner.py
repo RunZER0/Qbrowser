@@ -125,6 +125,17 @@ def execute(job: dict, store: JobStore) -> dict:
                     except subprocess.TimeoutExpired:
                         log.flush()
                         store.heartbeat(job["id"], log_bytes=path.stat().st_size)
+                        if store.get(job["id"])["stop_requested"]:
+                            process.terminate()
+                            try:
+                                process.wait(timeout=5)
+                            except subprocess.TimeoutExpired:
+                                process.kill()
+                                process.wait()
+                            return store.transition(job["id"], "needs_review",
+                                allowed={"running"},
+                                error="Stop requested; Agent-S terminated with unknown GUI effects",
+                                log_path=str(path))
             except KeyboardInterrupt:
                 process.terminate()
                 try:
@@ -136,6 +147,9 @@ def execute(job: dict, store: JobStore) -> dict:
                     error="Operator interrupted desktop task; screen state unknown",
                     log_path=str(path))
                 raise
+        if store.get(job["id"])["stop_requested"]:
+            return store.transition(job["id"], "needs_review", allowed={"running"},
+                error="Stopped after Agent-S ended; inspect screen", log_path=str(path))
         if code == 0:
             return store.transition(job["id"], "verify", allowed={"running"},
                 result="GUI process exited successfully. Verify actual on-screen outcome.",

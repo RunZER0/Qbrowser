@@ -343,6 +343,15 @@ def inspect_document(path: Path) -> dict:
         info["title"] = doc.core_properties.title or ""
         info["paragraphs"] = len(doc.paragraphs)
         info["tables"] = len(doc.tables)
+        info["author"] = doc.core_properties.author or ""
+        info["heading_count"] = sum(1 for p in doc.paragraphs if p.style and
+                                     p.style.name.lower().startswith("heading"))
+        for section in doc.sections:
+            if min(section.left_margin.inches, section.right_margin.inches,
+                   section.top_margin.inches, section.bottom_margin.inches) < 0.35:
+                info["issues"].append({"code": "tight_margins", "severity": "warning",
+                                      "detail": "Page margins below 0.35 inch may impair readability"})
+                break
         for p in doc.paragraphs:
             for run in p.runs:
                 if run.font.size and not 8 <= run.font.size.pt <= 36:
@@ -356,6 +365,9 @@ def inspect_document(path: Path) -> dict:
             info["sheets"] = [ws.title for ws in wb.worksheets]
             info["dimensions"] = [{"sheet": ws.title, "rows": ws.max_row, "columns": ws.max_column}
                                   for ws in wb.worksheets]
+            if any(ws.max_row > 1_048_576 or ws.max_column > 16384 for ws in wb.worksheets):
+                info["issues"].append({"code": "excel_dimensions", "severity": "error",
+                                      "detail": "Worksheet dimensions exceed Excel limits"})
         finally:
             wb.close()
     elif suffix == ".pptx":
@@ -363,6 +375,17 @@ def inspect_document(path: Path) -> dict:
         prs = Presentation(path)
         info["slides"] = len(prs.slides)
         for idx, slide in enumerate(prs.slides, 1):
+            text_boxes = [sh for sh in slide.shapes if sh.has_text_frame and
+                          sh.text.strip() and sh.width > 0 and sh.height > 0]
+            for i, left in enumerate(text_boxes):
+                for right in text_boxes[i+1:]:
+                    overlap_w = min(left.left + left.width, right.left + right.width) - max(left.left, right.left)
+                    overlap_h = min(left.top + left.height, right.top + right.height) - max(left.top, right.top)
+                    if overlap_w > 0 and overlap_h > 0:
+                        area = overlap_w * overlap_h
+                        if area > min(left.width * left.height, right.width * right.height) * 0.25:
+                            info["issues"].append({"code": "text_overlap", "severity": "warning",
+                                "detail": f"Slide {idx} contains materially overlapping text boxes"})
             for shape in slide.shapes:
                 if shape.left < 0 or shape.top < 0 or (
                     shape.left + shape.width > prs.slide_width + 10000 or
@@ -370,14 +393,31 @@ def inspect_document(path: Path) -> dict:
                 ):
                     info["issues"].append({"code": "out_of_slide", "severity": "error",
                         "detail": f"Slide {idx} has an off-canvas shape"})
-    # Citation signals are advisory; never claim external source verification.
-    citations = re.findall(r"\([A-Z][A-Za-z\-]+(?: et al\.)?,\s*(?:19|20)\d{2}\)", body)
+    # Internal reference consistency only. External factual validation needs research.
+    citation_pattern = re.compile(r"\(([A-Z][A-Za-z\-]+)(?: et al\.)?,\s*((?:19|20)\d{2})\)")
+    heading = re.search(r"(?im)^\s*(references|bibliography)\s*$", body)
+    citing_text = body[:heading.start()] if heading else body
+    references_text = body[heading.end():] if heading else ""
+    citations = citation_pattern.findall(citing_text)
     info["citation_signals"] = len(citations)
-    info["references_heading"] = bool(re.search(r"(?im)^\s*(references|bibliography)\s*$", body))
-    if citations and not info["references_heading"]:
+    info["references_heading"] = heading is not None
+    info["citation_pairs"] = sorted({f"{author} {year}" for author, year in citations})
+    unmatched = []
+    if citations and not heading:
         info["issues"].append({"code": "missing_references_heading", "severity": "warning",
                                "detail": "In-text author/year patterns appear without a references heading"})
-    info["source_verification"] = "not_performed"
+    if heading:
+        for author, year in sorted(set(citations)):
+            if not re.search(re.escape(author) + r"[^\n]{0,150}\b" + re.escape(year) + r"\b",
+                             references_text, flags=re.IGNORECASE):
+                unmatched.append(f"{author} ({year})")
+        if unmatched:
+            info["issues"].append({"code": "unmatched_citations", "severity": "warning",
+                  "detail": f"In-text citations missing an apparent matching reference: {', '.join(unmatched[:12])}"})
+    info["unmatched_citations"] = unmatched
+    urls = re.findall(r"https?://[^\s<>\"']+", body)
+    info["reference_urls"] = [u.rstrip(".,);")[:500] for u in urls[:100]]
+    info["source_verification"] = "internal_consistency_only_external_verification_required"
     return info
 
 

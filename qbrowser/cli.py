@@ -19,6 +19,7 @@ def parser() -> argparse.ArgumentParser:
     s.add_parser("init", help="Initialize the local job database")
     s.add_parser("install-openclaw", help="Install Qbrowser skill for an existing local OpenClaw agent")
     s.add_parser("doctor", help="Show local runtime prerequisites")
+    s.add_parser("smoke-model", help="Test vision and tool calls without touching desktop")
     deliver = s.add_parser("deliver", help="Send verified outputs via locally paired OpenClaw WhatsApp")
     deliver.add_argument("id")
     deliver.add_argument("--confirm", action="store_true", help="Explicitly authorize owner delivery")
@@ -87,6 +88,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
     if args.command == "doctor":
         return doctor()
+    if args.command == "smoke-model":
+        from qbrowser.smoke import probe
+        print(json.dumps(probe(), indent=2))
+        return 0
     if args.command == "backup":
         from qbrowser.backup import backup_database
         backup_database(JobStore(), args.path)

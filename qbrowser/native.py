@@ -258,10 +258,10 @@ class Desktop:
         raise ValueError(f"Unsupported desktop action: {action}")
 
 
-def screen_message(image_uri: str, dimensions: tuple[int, int]) -> dict:
+def screen_message(image_uri: str, dimensions: tuple[int, int], progress: str = "") -> dict:
     width, height = dimensions
     return {"role": "user", "content": [
-        {"type": "text", "text": f"CURRENT screenshot. Coordinate space: width={width}, height={height}. Choose the next single action."},
+        {"type": "text", "text": f"CURRENT screenshot. Coordinate space: width={width}, height={height}. Saved progress: {progress[:2200]}. Choose the next single action."},
         {"type": "image_url", "image_url": {"url": image_uri}},
     ]}
 
@@ -293,9 +293,18 @@ def run_native(job: dict, store: JobStore, *, model: Any | None = None,
     system = (SYSTEM + "\n" + GUARD + "\n" + policy +
               "\nWhen creating a document or file, save the final output in " + str(output_dir) +
               ". Do not assume it was saved until verified on the screen.")
+    previous = store.checkpoints(job["id"])
+    previous_summary = "; ".join(
+        f"{item['key']}={item['state']} ({item['detail'][:100]})"
+        for item in previous if item["key"] != "gui-action")[:2000]
+    if job["attempt"] > 1:
+        system += ("\nThis is an explicitly requeued attempt. Prior GUI actions may already "
+                   "have taken effect. Inspect the screen first; never repeat irreversible "
+                   "actions based only on previous milestone records.")
     history = [
         {"role": "system", "content": system},
-        {"role": "user", "content": "User task: " + instruction},
+        {"role": "user", "content": "User task: " + instruction +
+         ("\nEarlier saved milestones: " + previous_summary if previous_summary else "")},
     ]
     consecutive_errors = 0
     try:
@@ -311,7 +320,10 @@ def run_native(job: dict, store: JobStore, *, model: Any | None = None,
             if current["status"] != "running":
                 return current
             image, dimensions = desktop.observe()
-            history.append(screen_message(image, dimensions))
+            stages = store.checkpoints(job["id"])
+            progress = "; ".join(f"{i['key']}={i['state']}: {i['detail'][:90]}"
+                                for i in stages if i["key"] != "gui-action")
+            history.append(screen_message(image, dimensions, progress))
             history = compact(history)
             turn = model.ask(history)
             calls = turn.get("calls", [])

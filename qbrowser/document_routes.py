@@ -12,7 +12,7 @@ from qbrowser.artifact_vault import (
     create_output, convert_output, get_revision, list_revisions,
     open_snapshot, purge_expired, record_file, safe_name,
 )
-from qbrowser.document_engine import inspect_document, preview_png
+from qbrowser.document_engine import inspect_document, preview_png, preview_html
 from qbrowser.store import JobStore
 
 router = APIRouter(prefix="/api/jobs/{job_id}/documents", tags=["Documents"])
@@ -138,14 +138,16 @@ def preview(job_id: str, role: str, filename: str, version: int | None = None,
             if local.suffix.lower() in {".pdf", ".png", ".jpg", ".jpeg"}:
                 return Response(preview_png(local, page=page), media_type="image/png",
                     headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
-            analysis = inspect_document(local)
-            content = html.escape(analysis.get("preview", ""))
+            content = preview_html(local)
             markup = (
                 "<!doctype html><html><head><meta charset='utf-8'><title>Document Preview</title>"
                 "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+                "<style>body{font:16px system-ui;max-width:980px;margin:30px auto;padding:0 18px;}"
+                "table{border-collapse:collapse;margin:16px 0;}td{padding:5px 9px;}"
+                "section{border-bottom:1px solid #bbb;padding:12px 0;}"
+                "pre{white-space:pre-wrap;overflow-wrap:anywhere}</style>"
                 "</head><body><h2>" + html.escape(item["filename"]) + "</h2>"
-                "<pre style='white-space:pre-wrap; overflow-wrap:anywhere; font-family:system-ui'>"
-                + content + "</pre><p>Text-only preview. Original layout not rendered.</p></body></html>"
+                + content + "<p>Semantic preview. Exact Office page layout not rendered.</p></body></html>"
             )
             return HTMLResponse(markup, headers={
                 "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'",

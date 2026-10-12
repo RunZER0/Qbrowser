@@ -9,6 +9,7 @@ import argparse
 import os
 import shutil
 import secrets
+import re
 import subprocess
 import sys
 import venv
@@ -40,6 +41,15 @@ def main() -> int:
         env.write_text(template, encoding="utf-8")
         if os.name != "nt":
             os.chmod(env, 0o600)
+    else:
+        existing = env.read_text(encoding="utf-8")
+        replaced, count = re.subn(r"(?m)^QBROWSER_API_TOKEN=[ \\t]*$",
+                                  lambda _: "QBROWSER_API_TOKEN=" + secrets.token_urlsafe(32),
+                                  existing)
+        if count:
+            env.write_text(replaced, encoding="utf-8")
+            if os.name != "nt":
+                os.chmod(env, 0o600)
     cli = directory / ("Scripts/qbrowser.exe" if os.name == "nt" else "bin/qbrowser")
     subprocess.run([str(cli), "init"], check=True, cwd=ROOT)
     subprocess.run([str(cli), "doctor"], check=True, cwd=ROOT)

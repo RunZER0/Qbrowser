@@ -42,6 +42,10 @@ def deliver_verified(store: JobStore, job_id: str, *, confirm: bool = False) -> 
     job = store.get(job_id)
     if job["status"] != "completed":
         raise ValueError("Only operator-verified completed jobs may be delivered")
+    from qbrowser.artifacts import index_outputs
+    from qbrowser.artifact_vault import sync_outputs
+    sync_outputs(store, job_id)
+    index_outputs(store, job_id)
     files = artifacts(store, job_id)
     if not files:
         raise ValueError("No indexed deliverables found; check job workspace")

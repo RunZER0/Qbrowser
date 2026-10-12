@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import mimetypes
 import os
 import re
 import shutil
@@ -141,9 +140,9 @@ def validate_file(path: Path, filename: str) -> dict:
     return details
 
 
-def _stream_to_temp(stream: BinaryIO, target_dir: Path) -> Path:
+def _stream_to_temp(stream: BinaryIO, target_dir: Path, *, suffix: str = "") -> Path:
     target_dir.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(prefix=".incoming-", dir=target_dir)
+    fd, tmp = tempfile.mkstemp(prefix=".incoming-", suffix=suffix, dir=target_dir)
     total = 0
     try:
         with os.fdopen(fd, "wb") as dest:
@@ -183,9 +182,9 @@ def record_file(store: JobStore, job_id: str, filename: str, role: str,
     if role not in {"input", "output"}:
         raise ValueError("Role must be input or output")
     root = workspace(job_id)
-    temp = _stream_to_temp(stream, root)
+    temp = _stream_to_temp(stream, root, suffix=Path(filename).suffix.lower())
     try:
-        info = validate_file(temp.with_name(filename) if False else temp, filename)
+        info = validate_file(temp, filename)
         digest, size = _hash(temp)
         destination = _vault_path(job_id, digest)
         destination.parent.mkdir(parents=True, exist_ok=True)

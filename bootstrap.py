@@ -1,0 +1,51 @@
+#!/usr/bin/env python3
+"""Install Qbrowser into an isolated environment on the current machine.
+
+Does not launch GUI control or configure model secrets.
+"""
+from __future__ import annotations
+
+import argparse
+import os
+import shutil
+import subprocess
+import sys
+import venv
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent
+
+
+def main() -> int:
+    p = argparse.ArgumentParser(description="Set up Qbrowser local dependencies")
+    p.add_argument("--minimal", action="store_true",
+                   help="Install the workboard only (skip the Agent-S GUI dependency)")
+    args = p.parse_args()
+    directory = ROOT / ".venv"
+    if not directory.exists():
+        venv.EnvBuilder(with_pip=True).create(directory)
+    python = directory / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    subprocess.run([str(python), "-m", "pip", "install", "--upgrade", "pip"], check=True)
+    extra = "server" if args.minimal else "server,desktop"
+    subprocess.run([str(python), "-m", "pip", "install", "-e", f".[{extra}]"],
+                   check=True, cwd=ROOT)
+    env = ROOT / ".env"
+    if not env.exists():
+        shutil.copyfile(ROOT / ".env.example", env)
+        if os.name != "nt":
+            os.chmod(env, 0o600)
+    cli = directory / ("Scripts/qbrowser.exe" if os.name == "nt" else "bin/qbrowser")
+    subprocess.run([str(cli), "init"], check=True, cwd=ROOT)
+    subprocess.run([str(cli), "doctor"], check=True, cwd=ROOT)
+    print("\nEdit .env for your model and grounding configuration.")
+    print(f"Dashboard: {cli} serve")
+    print(f"Desktop worker: {cli} worker")
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except subprocess.CalledProcessError as exc:
+        print(f"Installation command failed with exit code {exc.returncode}", file=sys.stderr)
+        raise SystemExit(exc.returncode)

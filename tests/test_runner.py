@@ -36,7 +36,7 @@ class RunnerTests(unittest.TestCase):
         self.assertIsInstance(cmd, list)
         instruction = cmd[cmd.index("--task") + 1]
         self.assertIn("Do not make purchases", instruction)
-        self.assertNotIn("private", str(cmd))
+        self.assertNotIn("private", cmd)
         self.assertEqual(cmd[0], "/unused/agent_s")
 
     def test_approval_changes_prompt(self):

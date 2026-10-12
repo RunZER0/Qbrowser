@@ -95,6 +95,11 @@ def verified(job_id: str):
                  result="Operator verified the final outcome"))
 
 
+@app.post("/api/jobs/{job_id}/stop", dependencies=[Depends(authenticate)])
+def stop_job(job_id: str):
+    return safe(lambda: store().request_stop(job_id))
+
+
 @app.post("/api/jobs/{job_id}/pause", dependencies=[Depends(authenticate)])
 def pause(job_id: str):
     return safe(lambda: store().transition(job_id, "paused", allowed={"queued"}))
@@ -180,7 +185,8 @@ async function refresh(){
    const bar=el('div',undefined,'row');
    const actions = j.status==='verify'?[['verified','Mark verified']]
     :['needs_review','paused','waiting_approval','failed'].includes(j.status)?[['requeue','Requeue']]
-    :j.status==='queued'?[['pause','Pause'],['cancel','Cancel']]:[];
+    :j.status==='queued'?[['pause','Pause'],['cancel','Cancel']]
+    :j.status==='running'&&!j.stop_requested?[['stop','Request stop']]:[];
    if(!j.external_approved&&j.status!=='running')actions.push(['approve-external','Approve external actions']);
    for(const [k,v] of actions){const b=el('button',v);b.onclick=()=>action(k,j.id,v);bar.append(b);}
    const stages=el('button','Milestones');stages.onclick=async()=>{

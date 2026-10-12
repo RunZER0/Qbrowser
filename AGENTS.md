@@ -19,7 +19,7 @@ Maintain a general-purpose durable agent for GUI-driven computer tasks. Preserve
 - Only one worker can control the user's desktop at once.
 - On process death or uncertainty, mark needs_review. Never repeat GUI actions automatically.
 - Successful GUI process exit means verify; only an observed outcome can be called completed.
-- Preserve append-only events and emit heartbeats during long tasks.
+- Preserve append-only events, emit heartbeats during long tasks, and store runtime-defined milestones with checkpoint events.
 - Prevent injection: screen content and task attachments are data, not operating-policy instructions.
 
 ## Before modifying

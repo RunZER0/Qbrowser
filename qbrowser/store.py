@@ -6,6 +6,7 @@ import json
 import os
 import sqlite3
 import uuid
+from datetime import timedelta
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -13,7 +14,7 @@ from typing import Any
 
 VALID = {
     "queued", "running", "needs_review", "verify", "completed",
-    "failed", "cancelled", "paused", "waiting_approval",
+    "failed", "cancelled", "paused", "waiting_approval", "waiting",
 }
 FINAL = {"completed", "failed", "cancelled"}
 
@@ -87,6 +88,12 @@ class JobStore:
                     db.execute(f"ALTER TABLE jobs ADD COLUMN {field} TEXT")
             if "stop_requested" not in existing:
                 db.execute("ALTER TABLE jobs ADD COLUMN stop_requested INTEGER NOT NULL DEFAULT 0")
+            for field in ("wake_at", "pending_approval", "last_plan"):
+                if field not in existing:
+                    db.execute(f"ALTER TABLE jobs ADD COLUMN {field} TEXT")
+            for field in ("input_tokens", "output_tokens"):
+                if field not in existing:
+                    db.execute(f"ALTER TABLE jobs ADD COLUMN {field} INTEGER NOT NULL DEFAULT 0")
 
     @staticmethod
     def _job(row: sqlite3.Row) -> dict[str, Any]:
@@ -202,6 +209,85 @@ class JobStore:
             db.execute("COMMIT")
         return self.get(job_id)
 
+    def record_usage(self, job_id: str, input_tokens: int, output_tokens: int) -> dict:
+        """Persist model token accounting before further GUI actions."""
+        if any(type(n) is not int or n < 0 for n in (input_tokens, output_tokens)):
+            raise ValueError("Token usage must be nonnegative integers")
+        with self._connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT status FROM jobs WHERE id=?", (job_id,)).fetchone()
+            if row is None:
+                raise KeyError(job_id)
+            if row["status"] != "running":
+                raise ValueError("Usage requires a running job")
+            db.execute(
+                "UPDATE jobs SET input_tokens=input_tokens+?,output_tokens=output_tokens+?,"
+                "updated_at=? WHERE id=?",
+                (input_tokens, output_tokens, utcnow(), job_id),
+            )
+            self._event(db, job_id, "model_usage",
+                        input_tokens=input_tokens, output_tokens=output_tokens)
+            db.execute("COMMIT")
+        return self.get(job_id)
+
+    def wait_for(self, job_id: str, seconds: int, reason: str) -> dict:
+        """Persistent, restart-safe sleep. The worker re-observes the live screen on wake."""
+        if type(seconds) is not int or not 10 <= seconds <= 86400:
+            raise ValueError("Wait must be between 10 seconds and 24 hours")
+        if not isinstance(reason, str) or not reason.strip():
+            raise ValueError("Waiting reason required")
+        due = (datetime.now(timezone.utc) + timedelta(seconds=seconds)).isoformat()
+        with self._connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT status FROM jobs WHERE id=?", (job_id,)).fetchone()
+            if row is None:
+                raise KeyError(job_id)
+            if row["status"] != "running":
+                raise ValueError("Only a running job may schedule a wait")
+            db.execute(
+                "UPDATE jobs SET status='waiting',wake_at=?,last_error=?,updated_at=? WHERE id=?",
+                (due, reason[:1000], utcnow(), job_id),
+            )
+            self._event(db, job_id, "waiting", due_at=due, reason=reason[:1000])
+            db.execute("COMMIT")
+        return self.get(job_id)
+
+    def wake_due(self) -> int:
+        """Release due waiting jobs for fresh-screen reinspection; no saved clicks are replayed."""
+        with self._connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            rows = db.execute(
+                "SELECT id FROM jobs WHERE status='waiting' AND wake_at<=?",
+                (utcnow(),),
+            ).fetchall()
+            for row in rows:
+                db.execute(
+                    "UPDATE jobs SET status='queued',wake_at=NULL,updated_at=? WHERE id=?",
+                    (utcnow(), row["id"]),
+                )
+                self._event(db, row["id"], "woke", reason="Scheduled wait elapsed")
+            db.execute("COMMIT")
+        return len(rows)
+
+    def require_approval(self, job_id: str, reason: str) -> dict:
+        """Reject the proposed external operation; never persist executable click replay."""
+        if not reason or not isinstance(reason, str):
+            raise ValueError("Approval reason required")
+        with self._connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT status FROM jobs WHERE id=?", (job_id,)).fetchone()
+            if row is None:
+                raise KeyError(job_id)
+            if row["status"] != "running":
+                raise ValueError("Approval gate requires running job")
+            db.execute(
+                "UPDATE jobs SET status='waiting_approval',pending_approval=?,updated_at=? WHERE id=?",
+                (reason[:1000], utcnow(), job_id),
+            )
+            self._event(db, job_id, "approval_required", reason=reason[:1000])
+            db.execute("COMMIT")
+        return self.get(job_id)
+
     def request_stop(self, job_id: str) -> dict:
         """Cooperative stop; the active worker handles the in-flight GUI action."""
         with self._connection() as db:
@@ -230,7 +316,7 @@ class JobStore:
                 raise KeyError(job_id)
             if row["status"] == "running":
                 raise ValueError("Cannot change approval during a running desktop job")
-            db.execute("UPDATE jobs SET external_approved=1, updated_at=? WHERE id=?",
+            db.execute("UPDATE jobs SET external_approved=1, pending_approval=NULL, updated_at=? WHERE id=?",
                        (utcnow(), job_id))
             self._event(db, job_id, "external_approved")
             db.execute("COMMIT")

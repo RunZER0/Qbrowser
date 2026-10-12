@@ -24,6 +24,28 @@ def parser() -> argparse.ArgumentParser:
     deliver = s.add_parser("deliver", help="Send verified outputs via locally paired OpenClaw WhatsApp")
     deliver.add_argument("id")
     deliver.add_argument("--confirm", action="store_true", help="Explicitly authorize owner delivery")
+    upload = s.add_parser("upload", help="Import and version a local document")
+    upload.add_argument("id")
+    upload.add_argument("path")
+    upload.add_argument("--role", choices=["input", "output"], default="input")
+    gen = s.add_parser("generate", help="Create a document from structured JSON")
+    gen.add_argument("id")
+    gen.add_argument("filename")
+    gen.add_argument("json_file")
+    conv = s.add_parser("convert", help="Convert a supported document")
+    conv.add_argument("id")
+    conv.add_argument("role", choices=["input", "output"])
+    conv.add_argument("filename")
+    conv.add_argument("destination")
+    rev = s.add_parser("versions", help="List immutable document versions")
+    rev.add_argument("id")
+    qc = s.add_parser("document-qa", help="Inspect metadata and quality of a saved document")
+    qc.add_argument("id")
+    qc.add_argument("role", choices=["input", "output"])
+    qc.add_argument("filename")
+    purge = s.add_parser("purge-documents", help="Preview or perform retention cleanup")
+    purge.add_argument("--days", type=int, required=True)
+    purge.add_argument("--confirm", action="store_true")
     backup = s.add_parser("backup", help="Create a consistent SQLite database backup")
     backup.add_argument("path", help="Destination .db path")
     add = s.add_parser("add", help="Queue a natural-language desktop job")
@@ -155,6 +177,41 @@ def main(argv: list[str] | None = None) -> int:
         except (RuntimeError, KeyboardInterrupt) as exc:
             print(str(exc), file=sys.stderr)
             return 2 if isinstance(exc, RuntimeError) else 130
+        return 0
+    if args.command == "upload":
+        from qbrowser.artifact_vault import record_file
+        source = Path(args.path).expanduser()
+        with source.open("rb") as fp:
+            result = record_file(store, args.id, source.name, args.role, fp)
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+        return 0
+    if args.command == "generate":
+        from qbrowser.artifact_vault import create_output
+        data = json.loads(Path(args.json_file).read_text(encoding="utf-8"))
+        print(json.dumps(create_output(store, args.id, args.filename, data),
+                         indent=2, ensure_ascii=False))
+        return 0
+    if args.command == "convert":
+        from qbrowser.artifact_vault import convert_output
+        print(json.dumps(convert_output(store, args.id, args.role,
+            args.filename, args.destination), indent=2, ensure_ascii=False))
+        return 0
+    if args.command == "versions":
+        from qbrowser.artifact_vault import list_revisions
+        print(json.dumps(list_revisions(store, args.id), indent=2, ensure_ascii=False))
+        return 0
+    if args.command == "document-qa":
+        from qbrowser.artifact_vault import open_snapshot
+        from qbrowser.document_routes import typed_source
+        from qbrowser.document_engine import inspect_document
+        _, blob = open_snapshot(store, args.id, args.role, args.filename)
+        with typed_source(blob, args.filename) as document:
+            print(json.dumps(inspect_document(document), indent=2, ensure_ascii=False))
+        return 0
+    if args.command == "purge-documents":
+        from qbrowser.artifact_vault import purge_expired
+        print(json.dumps(purge_expired(store, days=args.days, dry_run=not args.confirm),
+                         indent=2, ensure_ascii=False))
         return 0
     if args.command == "deliver":
         from qbrowser.delivery import deliver_verified

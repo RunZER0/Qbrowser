@@ -72,6 +72,14 @@ class JobStore:
                     data TEXT NOT NULL DEFAULT '{}'
                 );
                 CREATE INDEX IF NOT EXISTS event_job ON events(job_id, seq);
+                CREATE TABLE IF NOT EXISTS checkpoints (
+                    job_id TEXT NOT NULL REFERENCES jobs(id),
+                    key TEXT NOT NULL,
+                    state TEXT NOT NULL,
+                    detail TEXT NOT NULL DEFAULT '',
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY(job_id, key)
+                );
             """)
 
     @staticmethod
@@ -189,6 +197,42 @@ class JobStore:
             self._event(db, job_id, "external_approved")
             db.execute("COMMIT")
         return self.get(job_id)
+
+    def checkpoint(self, job_id: str, key: str, state: str, detail: str = "") -> dict:
+        """Durable progress marker for plans of any shape, created at runtime."""
+        if not key or len(key) > 120 or not all(ch.isalnum() or ch in "-_." for ch in key):
+            raise ValueError("Checkpoint key must contain 1-120 letters, digits, dots, dashes or underscores")
+        if state not in {"pending", "in_progress", "done", "blocked", "skipped"}:
+            raise ValueError("Invalid checkpoint state")
+        if len(detail) > 10000:
+            raise ValueError("Checkpoint detail exceeds 10000 characters")
+        with self._connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT status FROM jobs WHERE id=?", (job_id,)).fetchone()
+            if row is None:
+                raise KeyError(job_id)
+            if row["status"] in FINAL:
+                raise ValueError("Cannot change checkpoints on a finished job")
+            stamp = utcnow()
+            db.execute("""
+                INSERT INTO checkpoints(job_id,key,state,detail,updated_at)
+                VALUES(?,?,?,?,?)
+                ON CONFLICT(job_id,key) DO UPDATE SET state=excluded.state,
+                    detail=excluded.detail,updated_at=excluded.updated_at
+                """, (job_id, key, state, detail, stamp))
+            self._event(db, job_id, "checkpoint", key=key, state=state, detail=detail)
+            db.execute("COMMIT")
+        return {"job_id": job_id, "key": key, "state": state,
+                "detail": detail, "updated_at": stamp}
+
+    def checkpoints(self, job_id: str) -> list[dict]:
+        self.get(job_id)
+        with self._connection() as db:
+            rows = db.execute(
+                "SELECT * FROM checkpoints WHERE job_id=? ORDER BY updated_at, key",
+                (job_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     def heartbeat(self, job_id: str, *, log_bytes: int = 0) -> None:
         """Persist liveness, without claiming GUI task progress or success."""

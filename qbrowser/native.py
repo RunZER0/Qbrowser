@@ -417,6 +417,9 @@ def run_native(job: dict, store: JobStore, *, model: Any | None = None,
                     marker = store.checkpoint(job["id"], args.get("key", ""),
                                               args.get("state", ""), args.get("detail", ""))
                     output = f"Milestone saved: {marker['key']} = {marker['state']}"
+                    if marker["state"] == "done":
+                        from qbrowser.artifact_vault import sync_outputs
+                        sync_outputs(store, job["id"])
                 elif name == "document_action":
                     from qbrowser.document_tools import perform_document_action
                     output = perform_document_action(store, job["id"], args)
@@ -435,6 +438,9 @@ def run_native(job: dict, store: JobStore, *, model: Any | None = None,
                     # No text payload, typed passwords or screenshot contents in the journal.
                     store.checkpoint(job["id"], "gui-action", "in_progress",
                                      f"Step {step+1}: {args.get('action')}")
+                    if (step + 1) % 20 == 0:
+                        from qbrowser.artifact_vault import sync_outputs
+                        sync_outputs(store, job["id"])
                 else:
                     raise ValueError("Unknown model tool: " + name)
             except (RuntimeError, ValueError, OSError) as exc:

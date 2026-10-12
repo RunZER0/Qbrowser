@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "qbrowser-agent"
+version = "0.1.0"
+description = "Durable local job manager for Agent-S graphical computer automation"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+server = ["fastapi>=0.110,<1", "uvicorn>=0.29,<1"]
+desktop = ["gui-agents>=0.2"]
+dev = ["pytest>=8", "httpx>=0.27", "fastapi>=0.110,<1"]
+
+[project.scripts]
+qbrowser = "qbrowser.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["qbrowser*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

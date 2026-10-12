@@ -85,11 +85,14 @@ class JobStore:
             for field in ("engine", "provider", "model"):
                 if field not in existing:
                     db.execute(f"ALTER TABLE jobs ADD COLUMN {field} TEXT")
+            if "stop_requested" not in existing:
+                db.execute("ALTER TABLE jobs ADD COLUMN stop_requested INTEGER NOT NULL DEFAULT 0")
 
     @staticmethod
     def _job(row: sqlite3.Row) -> dict[str, Any]:
         item = dict(row)
         item["external_approved"] = bool(item["external_approved"])
+        item["stop_requested"] = bool(item.get("stop_requested", 0))
         return item
 
     @staticmethod
@@ -164,7 +167,7 @@ class JobStore:
             stamp = utcnow()
             db.execute(
                 """UPDATE jobs SET status='running', attempt=attempt+1,
-                   updated_at=?, started_at=?, finished_at=NULL, last_error=NULL
+                   updated_at=?, started_at=?, finished_at=NULL, last_error=NULL, stop_requested=0
                    WHERE id=? AND status='queued'""",
                 (stamp, stamp, row["id"]),
             )
@@ -196,6 +199,26 @@ class JobStore:
             )
             self._event(db, job_id, "status", previous=row["status"], current=to,
                         error=error, result=result, log_path=log_path)
+            db.execute("COMMIT")
+        return self.get(job_id)
+
+    def request_stop(self, job_id: str) -> dict:
+        """Cooperative stop; the active worker handles the in-flight GUI action."""
+        with self._connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT status,stop_requested FROM jobs WHERE id=?", (job_id,)).fetchone()
+            if row is None:
+                raise KeyError(job_id)
+            if row["status"] in FINAL:
+                raise ValueError("Job already finished")
+            if row["status"] == "running":
+                db.execute("UPDATE jobs SET stop_requested=1,updated_at=? WHERE id=?",
+                           (utcnow(), job_id))
+                self._event(db, job_id, "stop_requested")
+            else:
+                db.execute("UPDATE jobs SET status='cancelled',updated_at=?,finished_at=? WHERE id=?",
+                           (utcnow(), utcnow(), job_id))
+                self._event(db, job_id, "status", previous=row["status"], current="cancelled")
             db.execute("COMMIT")
         return self.get(job_id)
 

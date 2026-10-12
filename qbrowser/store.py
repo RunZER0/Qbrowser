@@ -316,6 +316,8 @@ class JobStore:
                 raise KeyError(job_id)
             if row["status"] == "running":
                 raise ValueError("Cannot change approval during a running desktop job")
+            if row["status"] in FINAL:
+                raise ValueError("Cannot authorize a finished job")
             db.execute(
                 "UPDATE jobs SET external_approved=1,pending_approval=NULL,updated_at=?, "
                 "status=CASE WHEN status='waiting_approval' THEN 'queued' ELSE status END "

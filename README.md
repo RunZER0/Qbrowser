@@ -53,6 +53,22 @@ The model connects via API or a local OpenAI-compatible inference endpoint. No w
 
 After manually reviewing a completed task, the owner may send verified files through a paired OpenClaw WhatsApp channel with `qbrowser deliver JOB_ID --confirm`. Set `QBROWSER_OWNER_WHATSAPP` to the owner's number first. To back up the job database, use `qbrowser backup /path/to/backup.db`. See the [installation guide](docs/INSTALL.md) for recovery procedures.
 
+## Document and artifact workbench
+
+Every job now has a versioned document vault. Upload instructions or source documents through **Documents → Upload file**, produce local DOCX/PDF/XLSX/PPTX files using the managed document tools, convert supported text/data formats, review QA results and download any immutable revision from the authenticated dashboard.
+
+Examples:
+
+```bash
+qbrowser upload JOB_ID ./assignment.pdf --role input
+qbrowser generate JOB_ID answer.docx ./document-payload.json
+qbrowser convert JOB_ID output answer.docx answer.txt
+qbrowser versions JOB_ID
+qbrowser document-qa JOB_ID output answer.docx
+```
+
+Automated retention is disabled by default. See [document and artifact documentation](docs/DOCUMENTS.md) for the supported conversion matrix, limitations, security and lifecycle operations.
+
 ## Important behavior
 
 Tasks and milestones survive restarts. Qbrowser serializes mouse/keyboard access, bounds execution by actions/time, and flags uncertain outcomes rather than replaying unknown GUI effects. Model-reported completion is marked `verify` pending operator confirmation. Model-classified external actions stop for approval; destructive actions are blocked. A model can still misclassify an unsafe click, so use a sandbox or dedicated computer and supervision. GUI waits can be persisted and reobserved on wake, and token limits bound model spending.

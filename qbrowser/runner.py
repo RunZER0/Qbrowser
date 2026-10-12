@@ -171,6 +171,7 @@ def worker(store: JobStore, *, once: bool = False, poll_seconds: float = 2.0):
             print(f"Recovered {interrupted} interrupted job(s) into needs_review.")
         print("Desktop worker active. Press Ctrl+C to stop after the current task.")
         while True:
+            store.wake_due()
             job = store.claim()
             if job:
                 print(f"Running {job['id']} (attempt {job['attempt']})")

@@ -1,51 +1,48 @@
 # Qbrowser
 
-A local-first agent workbench for arbitrary computer tasks. Qbrowser accepts natural-language jobs, stores durable execution state in SQLite, runs the existing Agent-S GUI operator through a controlled desktop worker, and exposes a local dashboard and HTTP API.
+Local-first AI computer operator using **one multimodal model** for screenshot understanding, reasoning and GUI actions. Includes persistent SQLite jobs, an event journal, agent-defined checkpoints, a loopback dashboard and optional Agent-S backend.
 
-**Current scope:** one desktop worker; arbitrary task instructions; persistent jobs, event logs, progress, operator approval, crash recovery and local installation. No predefined website-specific workflows. WhatsApp intake and distributed workers are later integrations.
+**Native default:** Z.ai `glm-5.3-flash`. **Alternative:** DeepSeek `deepseek-flash`. Both use official OpenAI-compatible vision and tool-calling interfaces; website interactions occur through the visible computer interface.
 
-The desktop operator uses normal GUI interactions (screenshots, clicks, keyboard and scrolling), with model inference and visual grounding supplied by Agent-S. It needs a local desktop session and separately configured model credentials and grounding endpoint.
-
-## Quick start
-
-The cross-platform setup script prepares a local virtual environment and installs the existing GUI agent:
+## Install
 
 ```bash
+git clone https://github.com/RunZER0/Qbrowser.git
+cd Qbrowser
 python bootstrap.py
 ```
 
-The script creates an editable `.env` file and does not start desktop control. Run `qbrowser doctor` after configuring the model and grounding endpoint.
+Edit `.env` with `ZAI_API_KEY` (or set `QBROWSER_PROVIDER=deepseek` and `DEEPSEEK_API_KEY`). Keep that file private.
 
-Alternatively, install components manually:
+In two different terminals (activate `.venv` or invoke the executable by its full path):
 
 ```bash
-python -m venv .venv
-# Windows PowerShell: .venv\Scripts\Activate.ps1
-# macOS/Linux: source .venv/bin/activate
-python -m pip install -e ".[server]"
-qbrowser init
-qbrowser doctor
 qbrowser serve
-```
-
-In another terminal, after installing the optional GUI engine (`pip install -e ".[desktop]"`) and setting configuration:
-
-```bash
 qbrowser worker
 ```
 
-Open **http://127.0.0.1:8765**. Jobs are created and managed through the local dashboard or CLI: `qbrowser add "Open a browser and ..."`; `qbrowser list`.
+Browse to http://127.0.0.1:8765, enter any natural-language task and queue it. The worker controls your visible desktop. Leave that session unlocked while working.
 
-See `docs/INSTALL.md` for model, grounding, desktop permissions and safety configuration.
+Examples:
 
-## Technology adopted
+```bash
+qbrowser add "Open the browser, find the latest report, and summarize it"
+qbrowser list
+qbrowser checkpoints JOB_ID
+qbrowser events JOB_ID
+```
 
-- [Agent-S](https://github.com/simular-ai/Agent-S), Apache-2.0: full-screen GUI agent. Installed locally as the existing `gui-agents` package, not copied or misrepresented as a GitHub fork.
-- [OpenClaw](https://github.com/openclaw/openclaw): optional intake and orchestration integration. Qbrowser provides a documented local CLI and HTTP bridge, so OpenClaw can hand tasks to the local worker without rewriting the GUI agent.
-- Python 3.11+, SQLite and optional FastAPI for the dashboard.
+## Engines
 
-## Safety and progress behavior
+- **`QBROWSER_ENGINE=native` (default):** one vision model, screenshot-and-action loop, built on OpenAI-compatible Chat Completions, PyAutoGUI, Pillow and Pyperclip. No separate 7B grounding model.
+- **`QBROWSER_ENGINE=agent_s`:** mature [Agent-S](https://github.com/simular-ai/Agent-S) as an alternative, installed with `python bootstrap.py --agent-s`. Requires its own reasoning model and grounding endpoint.
 
-Qbrowser never starts a desktop-control task until `qbrowser worker` is deliberately started. Only one job can hold the desktop lease. A failed or abruptly interrupted GUI task moves to **needs_review** because replaying clicks may duplicate external actions. Operators can explicitly requeue it after checking the target apps. The agent is instructed to pause before publishing, payments, destructive operations or sharing private data unless approved for that job.
+The model connects via API or a local OpenAI-compatible inference endpoint. No website-specific APIs are required.
 
-Data is stored in `~/.qbrowser/qbrowser.db` by default. The local API binds to loopback by default and supports an optional bearer token. No web or desktop account credentials are stored in SQLite.
+## Important behavior
+
+Tasks and milestones survive restarts. Qbrowser serializes mouse/keyboard access, bounds execution by actions/time, and flags uncertain outcomes rather than replaying unknown GUI effects. Model-reported completion is marked `verify` pending operator confirmation. External actions need explicit owner authorization; pixel-level GUI control cannot perfectly classify consequences, so a sandbox or dedicated computer and supervision are still necessary.
+
+**Operational status:** unit/API tests run in GitHub Actions; model and OS GUI end-to-end tests require an authorized local machine with credentials. WhatsApp messaging, automatic delivery and long-lived external-event waiting are subsequent integrations, documented in the [product checklist](docs/PRODUCT_CHECKLIST.md).
+
+See [installation and security details](docs/INSTALL.md), [product checklist](docs/PRODUCT_CHECKLIST.md), and [OpenClaw handoff](examples/openclaw/SKILL.md).

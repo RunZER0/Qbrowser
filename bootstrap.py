@@ -30,7 +30,7 @@ def main() -> int:
         venv.EnvBuilder(with_pip=True).create(directory)
     python = directory / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     subprocess.run([str(python), "-m", "pip", "install", "--upgrade", "pip"], check=True)
-    extra = "server" if args.minimal else ("server,native,desktop" if args.agent_s else "server,native")
+    extra = "server,documents" if args.minimal else ("server,native,documents,desktop" if args.agent_s else "server,native,documents")
     subprocess.run([str(python), "-m", "pip", "install", "-e", f".[{extra}]"],
                    check=True, cwd=ROOT)
     env = ROOT / ".env"

@@ -185,3 +185,25 @@ def test_upload_request_content_length_guard():
                 "file": ("notes.txt", io.BytesIO(b"short"), "text/plain"),
             }, headers={**headers, "Content-Length": str(102 * 1024 * 1024)})
             assert oversized.status_code == 413
+
+
+
+def test_semantic_office_preview_escapes_untrusted_html():
+    with TemporaryDirectory() as directory, patch.dict(os.environ, {
+        "QBROWSER_HOME": directory, "QBROWSER_API_TOKEN": "secret",
+    }):
+        with TestClient(app) as client:
+            headers = {"Authorization": "Bearer secret"}
+            job = client.post("/api/jobs", json={"instruction": "Preview safe HTML"},
+                              headers=headers).json()
+            base = f"/api/jobs/{job['id']}/documents"
+            generated = client.post(base + "/generate", headers=headers, json={
+                "filename": "safe.docx", "data": {"title": "Safe Preview", "blocks": [
+                    {"type": "paragraph", "text": "<script>alert('XSS')</script>"}
+                ]}})
+            assert generated.status_code == 201, generated.text
+            html_preview = client.get(base + "/output/safe.docx/preview", headers=headers)
+            assert html_preview.status_code == 200
+            assert "<script>" not in html_preview.text
+            assert "&lt;script&gt;" in html_preview.text
+            assert "default-src 'none'" in html_preview.headers["content-security-policy"]

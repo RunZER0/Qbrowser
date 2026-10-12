@@ -298,13 +298,20 @@ def run_native(job: dict, store: JobStore, *, model: Any | None = None,
                 return store.transition(job["id"], "needs_review", allowed={"running"},
                                         error="Native agent reached time budget")
             # Cooperative cancellation between model calls.
-            if store.get(job["id"])["status"] != "running":
-                return store.get(job["id"])
+            current = store.get(job["id"])
+            if current["stop_requested"]:
+                return store.transition(job["id"], "needs_review", allowed={"running"},
+                                        error="Operator requested stop; inspect desktop for partial effects")
+            if current["status"] != "running":
+                return current
             image, dimensions = desktop.observe()
             history.append(screen_message(image, dimensions))
             history = compact(history)
             turn = model.ask(history)
             calls = turn.get("calls", [])
+            if store.get(job["id"])["stop_requested"]:
+                return store.transition(job["id"], "needs_review", allowed={"running"},
+                                        error="Stop requested during model inference; no further action executed")
             if len(calls) != 1:
                 # Force an explicit tool choice, rather than guessing from prose.
                 history.append({"role": "assistant", "content": turn.get("text") or "No valid tool call"})

@@ -81,6 +81,10 @@ class JobStore:
                     PRIMARY KEY(job_id, key)
                 );
             """)
+            existing = {row["name"] for row in db.execute("PRAGMA table_info(jobs)")}
+            for field in ("engine", "provider", "model"):
+                if field not in existing:
+                    db.execute(f"ALTER TABLE jobs ADD COLUMN {field} TEXT")
 
     @staticmethod
     def _job(row: sqlite3.Row) -> dict[str, Any]:
@@ -95,20 +99,31 @@ class JobStore:
             (job_id, utcnow(), kind, json.dumps(payload, ensure_ascii=False)),
         )
 
-    def create(self, instruction: str, *, priority: int = 0, external_approved: bool = False) -> dict:
+    def create(self, instruction: str, *, priority: int = 0,
+               external_approved: bool = False, engine: str | None = None,
+               provider: str | None = None, model: str | None = None) -> dict:
         instruction = instruction.strip()
         if not instruction or len(instruction) > 50000:
             raise ValueError("Instruction must contain 1–50000 characters")
+        if engine not in (None, "native", "agent_s"):
+            raise ValueError("Unsupported execution engine")
+        if provider not in (None, "zai", "deepseek", "custom"):
+            raise ValueError("Unsupported provider")
+        if model is not None and (not model.strip() or len(model) > 120):
+            raise ValueError("Invalid model identifier")
         ident = uuid.uuid4().hex[:12]
         stamp = utcnow()
         with self._connection() as db:
             db.execute(
-                """INSERT INTO jobs(id,instruction,priority,external_approved,created_at,updated_at)
-                   VALUES(?,?,?,?,?,?)""",
-                (ident, instruction, int(priority), int(external_approved), stamp, stamp),
+                """INSERT INTO jobs(id,instruction,priority,external_approved,created_at,updated_at,
+                                    engine,provider,model)
+                   VALUES(?,?,?,?,?,?,?,?,?)""",
+                (ident, instruction, int(priority), int(external_approved), stamp, stamp,
+                 engine, provider, model),
             )
             self._event(db, ident, "created", priority=int(priority),
-                        external_approved=bool(external_approved))
+                        external_approved=bool(external_approved), engine=engine,
+                        provider=provider, model=model)
         return self.get(ident)
 
     def get(self, job_id: str) -> dict:

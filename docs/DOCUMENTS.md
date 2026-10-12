@@ -93,7 +93,7 @@ Latest and historical versions are available via `qbrowser versions JOB_ID` and 
 
 ## Preview, review and quality controls
 
-The dashboard supports preview, download and QA review of each revision. PDFs render as genuine PNG previews; images render as thumbnails. Word, Excel, PowerPoint and text files currently use a **text-only preview**, with a conspicuous layout limitation notice.
+The dashboard supports preview, download and QA review of each revision. PDFs render as genuine PNG previews; images render as thumbnails. Word, Excel and PowerPoint files use sanitized semantic HTML previews (headings, tables and slide text); text files use escaped previews. These previews do not reproduce exact Office page layout.
 
 `qbrowser document-qa JOB_ID input instructions.pdf` reports metadata and issues. Heuristics include empty files, abnormal Word font sizes and narrow page margins, text box overlap and out-of-slide shapes in PowerPoint, workbook dimensions, in-text author/year citation consistency, missing references headings and citation/reference mismatches.
 

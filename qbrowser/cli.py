@@ -27,7 +27,7 @@ def parser() -> argparse.ArgumentParser:
     add.add_argument("--approve-external", action="store_true",
                      help="Authorize external submissions requested in this job")
     s.add_parser("list", help="List jobs")
-    for name in ("show", "events", "requeue", "verified", "cancel", "pause",
+    for name in ("show", "events", "requeue", "verified", "cancel", "stop", "pause",
                  "approve-external"):
         cmd = s.add_parser(name)
         cmd.add_argument("id", help="Job ID")
@@ -132,6 +132,8 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "verified":
         job = store.transition(args.id, "completed", allowed={"verify"},
                                result="Operator verified the final outcome")
+    elif args.command == "stop":
+        job = store.request_stop(args.id)
     elif args.command == "cancel":
         job = store.transition(args.id, "cancelled",
               allowed={"queued", "paused", "needs_review", "waiting_approval", "verify"})

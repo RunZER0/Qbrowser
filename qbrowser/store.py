@@ -190,6 +190,18 @@ class JobStore:
             db.execute("COMMIT")
         return self.get(job_id)
 
+    def heartbeat(self, job_id: str, *, log_bytes: int = 0) -> None:
+        """Persist liveness, without claiming GUI task progress or success."""
+        with self._connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            changed = db.execute(
+                "UPDATE jobs SET updated_at=? WHERE id=? AND status='running'",
+                (utcnow(), job_id),
+            )
+            if changed.rowcount == 1:
+                self._event(db, job_id, "heartbeat", log_bytes=log_bytes)
+            db.execute("COMMIT")
+
     def recover_interrupted(self) -> int:
         """Do not replay interrupted GUI actions automatically."""
         with self._connection() as db:

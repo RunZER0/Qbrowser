@@ -348,7 +348,8 @@ def run_native(job: dict, store: JobStore, *, model: Any | None = None,
     history = [
         {"role": "system", "content": system},
         {"role": "user", "content": "User task: " + instruction +
-         ("\nEarlier saved milestones: " + previous_summary if previous_summary else "")},
+         ("\nEarlier saved milestones: " + previous_summary if previous_summary else "") +
+         ("\nUploaded inputs: " + attachments if attachments else "")},
     ]
     consecutive_errors = 0
     try:

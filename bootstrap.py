@@ -20,13 +20,15 @@ def main() -> int:
     p = argparse.ArgumentParser(description="Set up Qbrowser local dependencies")
     p.add_argument("--minimal", action="store_true",
                    help="Install the workboard only (skip the Agent-S GUI dependency)")
+    p.add_argument("--agent-s", action="store_true",
+                   help="Install legacy Agent-S backend with its grounding-model requirement")
     args = p.parse_args()
     directory = ROOT / ".venv"
     if not directory.exists():
         venv.EnvBuilder(with_pip=True).create(directory)
     python = directory / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     subprocess.run([str(python), "-m", "pip", "install", "--upgrade", "pip"], check=True)
-    extra = "server" if args.minimal else "server,desktop"
+    extra = "server" if args.minimal else ("server,native,desktop" if args.agent_s else "server,native")
     subprocess.run([str(python), "-m", "pip", "install", "-e", f".[{extra}]"],
                    check=True, cwd=ROOT)
     env = ROOT / ".env"

@@ -92,7 +92,7 @@ def update_checkpoint(job_id: str, request: CheckpointUpdate):
 @app.post("/api/jobs/{job_id}/requeue", dependencies=[Depends(authenticate)])
 def requeue(job_id: str):
     return safe(lambda: store().transition(job_id, "queued",
-                allowed={"needs_review", "paused", "waiting_approval", "failed"}))
+                allowed={"needs_review", "paused", "failed"}))
 
 
 @app.post("/api/jobs/{job_id}/verified", dependencies=[Depends(authenticate)])
@@ -190,10 +190,10 @@ async function refresh(){
    if(j.result)card.append(el('pre',j.result));
    const bar=el('div',undefined,'row');
    const actions = j.status==='verify'?[['verified','Mark verified']]
-    :['needs_review','paused','waiting_approval','failed'].includes(j.status)?[['requeue','Requeue']]
+    :['needs_review','paused','failed'].includes(j.status)?[['requeue','Requeue']]
     :j.status==='queued'?[['pause','Pause'],['cancel','Cancel']]
     :j.status==='running'&&!j.stop_requested?[['stop','Request stop']]:[];
-   if(!j.external_approved&&j.status!=='running')actions.push(['approve-external','Approve external actions']);
+   if(!j.external_approved&&j.status!=='running'&&j.status!=='completed'&&j.status!=='cancelled')actions.push(['approve-external','Approve external actions']);
    for(const [k,v] of actions){const b=el('button',v);b.onclick=()=>action(k,j.id,v);bar.append(b);}
    const stages=el('button','Milestones');stages.onclick=async()=>{
     try{const stages=await api('/api/jobs/'+j.id+'/checkpoints');

@@ -64,7 +64,7 @@ class NativeTests(unittest.TestCase):
         job = self.claim()
         model = FakeModel(
             ("record_progress", {"key": "navigate", "state": "in_progress"}),
-            ("computer_action", {"action": "click", "x": 5, "y": 6}),
+            ("computer_action", {"action": "click", "x": 5, "y": 6, "impact":"local", "purpose":"Open local editor"}),
             ("record_progress", {"key": "navigate", "state": "done"}),
             ("finish_task", {"result": "Opened app", "evidence": "Visible on-screen"}),
         )
@@ -78,6 +78,61 @@ class NativeTests(unittest.TestCase):
         # Screenshots appear only in user turns; models receive the latest screenshot.
         self.assertTrue(any(isinstance(x["content"], list)
                             for x in model.histories[0] if x["role"] == "user"))
+
+    def test_unapproved_external_click_never_reaches_desktop(self):
+        job = self.claim()
+        model = FakeModel(("computer_action", {"action":"click", "x":10, "y":10,
+            "impact":"external", "purpose":"Send document to website"}))
+        desktop = FakeDesktop()
+        state = run_native(job, self.store, model=model, desktop=desktop, config=self.config)
+        self.assertEqual(state["status"], "waiting_approval")
+        self.assertEqual(desktop.actions, [])
+        self.assertIn("Send document", state["pending_approval"])
+        resumed = self.store.approve_external(job["id"])
+        self.assertEqual(resumed["status"], "queued")
+        self.assertTrue(resumed["external_approved"])
+
+    def test_missing_impact_fails_closed(self):
+        job = self.claim()
+        model = FakeModel(("computer_action", {"action":"click", "x":5, "y":6}))
+        desktop = FakeDesktop()
+        state = run_native(job, self.store, model=model, desktop=desktop, config=self.config)
+        self.assertEqual(state["status"], "waiting_approval")
+        self.assertFalse(desktop.actions)
+
+    def test_destructive_action_requires_manual_handling_even_when_approved(self):
+        self.store.create("Delete remote files", external_approved=True)
+        job = self.store.claim()
+        desktop = FakeDesktop()
+        model = FakeModel(("computer_action", {"action": "click", "x":5, "y":6,
+            "impact":"destructive","purpose":"Remove remote folder"}))
+        result = run_native(job, self.store, model=model, desktop=desktop, config=self.config)
+        self.assertEqual(result["status"], "waiting_approval")
+        self.assertEqual(desktop.actions, [])
+
+    def test_token_limit_stops_before_action(self):
+        job = self.claim()
+        model = FakeModel(("computer_action", {"action": "screenshot"}))
+        original = model.ask
+        def overbudget(history):
+            turn = original(history)
+            turn["usage"] = {"input":250000, "output":1}
+            return turn
+        model.ask = overbudget
+        desktop = FakeDesktop()
+        result = run_native(job, self.store, model=model, desktop=desktop, config=self.config)
+        self.assertEqual(result["status"], "needs_review")
+        self.assertEqual(desktop.actions, [])
+        self.assertEqual(result["input_tokens"], 250000)
+
+    def test_persisted_wait_request(self):
+        job = self.claim()
+        model = FakeModel(("wait_for_external", {"seconds":60,
+            "reason":"Report is being prepared"}))
+        result = run_native(job, self.store, model=model,
+            desktop=FakeDesktop(), config=self.config)
+        self.assertEqual(result["status"], "waiting")
+        self.assertIsNotNone(result["wake_at"])
 
     def test_request_assistance_is_blocked(self):
         job = self.claim()

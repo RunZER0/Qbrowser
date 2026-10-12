@@ -19,6 +19,13 @@ def parser() -> argparse.ArgumentParser:
     s.add_parser("init", help="Initialize the local job database")
     s.add_parser("install-openclaw", help="Install Qbrowser skill for an existing local OpenClaw agent")
     s.add_parser("doctor", help="Show local runtime prerequisites")
+    s.add_parser("smoke-model", help="Test vision and tool calls without touching desktop")
+    s.add_parser("smoke-desktop", help="Test screenshot access and coordinate mapping without clicks")
+    deliver = s.add_parser("deliver", help="Send verified outputs via locally paired OpenClaw WhatsApp")
+    deliver.add_argument("id")
+    deliver.add_argument("--confirm", action="store_true", help="Explicitly authorize owner delivery")
+    backup = s.add_parser("backup", help="Create a consistent SQLite database backup")
+    backup.add_argument("path", help="Destination .db path")
     add = s.add_parser("add", help="Queue a natural-language desktop job")
     add.add_argument("instruction", help="Task text, or '-' to read stdin")
     add.add_argument("--priority", type=int, default=0)
@@ -82,6 +89,19 @@ def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
     if args.command == "doctor":
         return doctor()
+    if args.command == "smoke-desktop":
+        from qbrowser.smoke import probe_desktop
+        print(json.dumps(probe_desktop(), indent=2))
+        return 0
+    if args.command == "smoke-model":
+        from qbrowser.smoke import probe
+        print(json.dumps(probe(), indent=2))
+        return 0
+    if args.command == "backup":
+        from qbrowser.backup import backup_database
+        backup_database(JobStore(), args.path)
+        print(f"Database backup created: {args.path}")
+        return 0
     if args.command == "install-openclaw":
         from pathlib import Path
         import shlex
@@ -136,6 +156,11 @@ def main(argv: list[str] | None = None) -> int:
             print(str(exc), file=sys.stderr)
             return 2 if isinstance(exc, RuntimeError) else 130
         return 0
+    if args.command == "deliver":
+        from qbrowser.delivery import deliver_verified
+        print(json.dumps(deliver_verified(store, args.id, confirm=args.confirm),
+                         indent=2, ensure_ascii=False))
+        return 0
     if args.command == "add":
         instruction = sys.stdin.read() if args.instruction == "-" else args.instruction
         job = store.create(instruction, priority=args.priority,
@@ -162,7 +187,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     elif args.command == "requeue":
         job = store.transition(args.id, "queued",
-              allowed={"needs_review", "paused", "waiting_approval", "failed"})
+              allowed={"needs_review", "paused", "failed"})
     elif args.command == "verified":
         job = store.transition(args.id, "completed", allowed={"verify"},
                                result="Operator verified the final outcome")

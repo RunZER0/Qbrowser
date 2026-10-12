@@ -34,11 +34,11 @@ Legend: **REUSE** = adopt maintained implementation; **ADAPT** = integrate or ta
 
 ## Current implementation evidence
 
-**Implemented in repository (cloud-tested):** workstreams 02 (OpenAI-compatible screenshot+tool protocol), 03 (PyAutoGUI action adapter, screenshot resizing and high-DPI mapping), 05 (dynamic progress records and model observe/act loop), 06 (bounded action history and duration), 07–09 (SQLite, crash review, exclusive worker), 12 (workboard with per-job model choice), 14 (workspace + hashed outputs), 16 (events and heartbeats), 17 (cooperative stop), and automated portions of 18–19.
+**Completed in code and simulated tests:** native multimodal action adapter; dynamic milestones; SQLite WAL task journal and model-token usage; exclusive desktop lease; bounded context, steps and wall-clock; stop-before-action checks for declared external operations; persisted approval and wait/wake states; per-job output hashing; cooperative cancellation; optional owner-confirmed WhatsApp file delivery; SQLite online backup; random default local API authentication token; a provider image/tool-call smoke probe and a local screenshot/DPI smoke probe.
 
-**Available as local adapters:** 01 (native engine and Agent-S selection), 04 (GUI through existing toolkit), 13 (OpenClaw skill installer). Live provider responses, actual OS GUI control and WhatsApp account authentication are NOT certified by cloud tests.
+**Cross-platform validation:** automated unit/API/security-contract tests pass on Python 3.11 and 3.12 for Windows, macOS and Linux. Native dependency installation is separately checked on Windows, macOS and Linux. All tests are headless: they do not demonstrate functional mouse/keyboard use on a logged-in desktop.
 
-**Not release-complete:** high-assurance consequential-action interception, independently verified task outcomes, provider budget metering, automatic external wait/wake scheduling, reliable customer delivery, backup/restore, security assessment, multi-OS E2E smoke matrix and multi-day endurance testing. These remain acceptance gates, despite the code being ready for local installation.
+**Still blocked for public unattended release:** live inference-provider vision/tool-call validation with the actual owner keys; logged-in Windows/macOS/Linux GUI smoke; safe treatment of misclassified consequential clicks (model labels cannot be treated as an independent security boundary); authenticated WhatsApp intake with actual paired account; independent results verification; output revision preservation and restore tooling; signed installers/updates; multi-day soak/security validation. The current release is a supervised local beta candidate, not production certification.
 
 ## Release phases
 

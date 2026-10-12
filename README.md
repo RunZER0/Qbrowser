@@ -12,7 +12,7 @@ cd Qbrowser
 python bootstrap.py
 ```
 
-Edit `.env` with `ZAI_API_KEY` (or set `QBROWSER_PROVIDER=deepseek` and `DEEPSEEK_API_KEY`). Keep that file private.
+Edit `.env` with `ZAI_API_KEY` (or set `QBROWSER_PROVIDER=deepseek` and `DEEPSEEK_API_KEY`). Keep that file private. The bootstrap generates a private `QBROWSER_API_TOKEN`; enter that value into the workboard token field.
 
 In two different terminals (activate `.venv` or invoke the executable by its full path):
 
@@ -20,6 +20,16 @@ In two different terminals (activate `.venv` or invoke the executable by its ful
 qbrowser serve
 qbrowser worker
 ```
+
+Before starting the worker on a new machine, validate your installation:
+
+```bash
+qbrowser doctor
+qbrowser smoke-model
+qbrowser smoke-desktop
+```
+
+The model smoke test sends a synthetic image to the configured inference endpoint; the desktop smoke test only reads a screenshot. Neither executes GUI clicks.
 
 Browse to http://127.0.0.1:8765, enter any natural-language task and queue it. The worker controls your visible desktop. Leave that session unlocked while working.
 
@@ -39,10 +49,14 @@ qbrowser events JOB_ID
 
 The model connects via API or a local OpenAI-compatible inference endpoint. No website-specific APIs are required.
 
+## Delivery and backup
+
+After manually reviewing a completed task, the owner may send verified files through a paired OpenClaw WhatsApp channel with `qbrowser deliver JOB_ID --confirm`. Set `QBROWSER_OWNER_WHATSAPP` to the owner's number first. To back up the job database, use `qbrowser backup /path/to/backup.db`. See the [installation guide](docs/INSTALL.md) for recovery procedures.
+
 ## Important behavior
 
-Tasks and milestones survive restarts. Qbrowser serializes mouse/keyboard access, bounds execution by actions/time, and flags uncertain outcomes rather than replaying unknown GUI effects. Model-reported completion is marked `verify` pending operator confirmation. External actions need explicit owner authorization; pixel-level GUI control cannot perfectly classify consequences, so a sandbox or dedicated computer and supervision are still necessary.
+Tasks and milestones survive restarts. Qbrowser serializes mouse/keyboard access, bounds execution by actions/time, and flags uncertain outcomes rather than replaying unknown GUI effects. Model-reported completion is marked `verify` pending operator confirmation. Model-classified external actions stop for approval; destructive actions are blocked. A model can still misclassify an unsafe click, so use a sandbox or dedicated computer and supervision. GUI waits can be persisted and reobserved on wake, and token limits bound model spending.
 
-**Operational status:** unit/API tests run in GitHub Actions; model and OS GUI end-to-end tests require an authorized local machine with credentials. WhatsApp messaging, automatic delivery and long-lived external-event waiting are subsequent integrations, documented in the [product checklist](docs/PRODUCT_CHECKLIST.md).
+**Operational status:** automated tests run on Windows/macOS/Linux with Python 3.11 and 3.12, and native dependencies install on all three platforms. Real model and OS GUI end-to-end tests require an authorized local machine with credentials. Authenticated WhatsApp intake, independent outcome verification and multi-day unattended testing remain outstanding.
 
-See [installation and security details](docs/INSTALL.md), [product checklist](docs/PRODUCT_CHECKLIST.md), and [OpenClaw handoff](examples/openclaw/SKILL.md).
+See [installation](docs/INSTALL.md), [security boundaries](SECURITY.md), [product checklist](docs/PRODUCT_CHECKLIST.md), and [OpenClaw handoff](examples/openclaw/SKILL.md).

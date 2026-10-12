@@ -6,9 +6,11 @@ permissions:
   contents: read
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ['3.11', '3.12']
     steps:
       - uses: actions/checkout@v4
@@ -21,3 +23,19 @@ jobs:
       - run: ruff check qbrowser tests --select E9,F63,F7,F82
       - run: python -m pytest -q
       - run: qbrowser --help
+
+  native-install:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e ".[server,native]"
+      - run: python -m pip check
+      - run: python -c "import PIL, openai, pyperclip; print('Native model and clipboard libraries installed')"

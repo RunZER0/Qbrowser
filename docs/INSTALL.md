@@ -31,7 +31,7 @@ macOS/Linux:
 
 In a second terminal start .venv/bin/qbrowser worker (PowerShell: .\.venv\Scripts\qbrowser.exe worker). Use Ctrl+C to exit; the current operation may need a manual review.
 
-Open http://127.0.0.1:8765 to queue tasks, inspect milestones, request stop, review files and verify outcomes.
+Open http://127.0.0.1:8765 to queue tasks, inspect milestones, request stop, review files and verify outcomes. A fresh bootstrap writes a randomized QBROWSER_API_TOKEN to .env. Enter that token into the dashboard's token field before using the API.
 
 ## Model setup
 
@@ -66,6 +66,16 @@ You can override the engine, provider and model per job in the web workboard or:
     qbrowser add "Open a browser and create a local report" --provider deepseek --model deepseek-flash
 
 The user-interface operating loop does not use any ChatGPT, Gemini, Grammarly or other website API. Those sites are navigated by GUI. The AI inference API is separate and optional when running an appropriate local model.
+
+## Local acceptance checks
+
+After filling your provider credentials in .env, run:
+
+    qbrowser doctor
+    qbrowser smoke-model
+    qbrowser smoke-desktop
+
+smoke-model sends a synthetic screenshot to your configured model, asks it to locate a colored target, and validates its structured tool action without clicking anything. This incurs a small inference charge. smoke-desktop captures a screenshot and verifies coordinate mapping without moving the mouse. Neither test establishes long-running GUI reliability. Before any real task, use a dedicated test browser profile and perform a supervised two-app workflow.
 
 ## Native interaction protocol
 
@@ -108,6 +118,21 @@ Generated outputs should be saved under ~/.qbrowser/workspaces/JOB_ID (or QBROWS
 - POST /api/jobs/{id}/stop, /pause, /cancel, /requeue, /approve-external, /verified
 
 The API listens on 127.0.0.1:8765. Optionally set QBROWSER_API_TOKEN for bearer authentication. Do not expose the HTTP server to the public internet. This service controls a real logged-in desktop.
+
+## Output delivery and database backup
+
+The owner may send a verified job's indexed files through an already paired OpenClaw WhatsApp channel:
+
+    qbrowser verified JOB_ID
+    qbrowser deliver JOB_ID --confirm
+
+Set QBROWSER_OWNER_WHATSAPP to the *owner's own* E.164 number (example: +2547...). The delivery command checks the job is completed, validates every file hash, and reserves a delivery record BEFORE sending. Uncertain send outcomes never retry automatically: inspect WhatsApp before attempting anything else. Qbrowser does not deliver automatically or receive arbitrary WhatsApp messages by itself.
+
+Back up the live job database (SQLite online backup API is safe with WAL):
+
+    qbrowser backup /path/to/qbrowser-backup.db
+
+A backup includes job state and metadata, not external workspaces or local API keys. Preserve workspaces separately. Restoring requires stopping the worker and server and taking an offline copy after integrity checking; automated restore is not yet implemented.
 
 ## Optional Agent-S backend
 

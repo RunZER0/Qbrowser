@@ -177,14 +177,16 @@ class Desktop:
     def observe(self) -> tuple[str, tuple[int, int]]:
         from PIL import Image
         img = self.gui.screenshot()
-        actual = img.size
-        if actual[0] < 1 or actual[1] < 1:
+        # Screenshot pixels and input coordinates differ on high-DPI/Retina displays.
+        logical = self.gui.size()
+        actual = (int(logical[0]), int(logical[1]))
+        if img.width < 1 or img.height < 1 or actual[0] < 1 or actual[1] < 1:
             raise RuntimeError("Empty screenshot")
         if img.width > self.max_image_width:
             factor = self.max_image_width / img.width
             newsize = (self.max_image_width, max(1, round(img.height * factor)))
             img = img.resize(newsize, Image.Resampling.LANCZOS)
-        self.last_actual = actual
+        self.last_actual = actual  # input-device coordinate space, not screenshot pixels
         self.last_scaled = img.size
         buff = io.BytesIO()
         img.convert("RGB").save(buff, format="JPEG", quality=75, optimize=True)

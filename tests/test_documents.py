@@ -153,6 +153,7 @@ def test_conversion_refuses_layout_loss(setup_job):
 def test_output_gui_file_snapshot_versioning(setup_job):
     store, job, root = setup_job
     working = root / "workspaces" / job
+    working.mkdir(parents=True, exist_ok=True)
     working.joinpath("draft.txt").write_text("Draft one", encoding="utf-8")
     assert sync_outputs(store, job)[0]["version"] == 1
     working.joinpath("draft.txt").write_text("Draft two", encoding="utf-8")

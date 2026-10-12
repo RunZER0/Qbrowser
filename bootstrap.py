@@ -43,7 +43,7 @@ def main() -> int:
             os.chmod(env, 0o600)
     else:
         existing = env.read_text(encoding="utf-8")
-        replaced, count = re.subn(r"(?m)^QBROWSER_API_TOKEN=[ \\t]*$",
+        replaced, count = re.subn(r"(?m)^QBROWSER_API_TOKEN=[ \t]*$",
                                   lambda _: "QBROWSER_API_TOKEN=" + secrets.token_urlsafe(32),
                                   existing)
         if count:

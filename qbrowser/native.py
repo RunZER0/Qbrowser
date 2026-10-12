@@ -27,6 +27,11 @@ Handle novel tasks by making and revising a plan as you learn about the interfac
 Do not claim success until the requested outcome is visible and confirmed.
 If an account asks for authentication, CAPTCHA, or anything unexpected that
 requires owner participation, request_assistance.
+For every click, double_click, hotkey, keypress or text paste, classify impact:
+local (ordinary local navigation/editing), external (sending, submitting, uploading,
+publishing, financial/account mutations), destructive (deleting/irreversible changes).
+State the purpose. If uncertain, use external. Model labels are an aid to the
+runtime gate, not independent permission. Never mislabel an external action as local.
 When waiting for an external report, use short waits within the step budget; if
 this cannot finish, request_assistance with a specific recovery instruction.
 No terminal commands or arbitrary code execution are available.
@@ -53,6 +58,8 @@ TOOLS = [
             "text": {"type": "string"}, "keys": {"type": "array", "items": {"type": "string"}},
             "amount": {"type": "integer"},
             "seconds": {"type": "number"},
+            "impact": {"type": "string", "enum": ["local", "external", "destructive"]},
+            "purpose": {"type": "string"},
         }, "required": ["action"], "additionalProperties": False}
     }},
     {"type": "function", "function": {
@@ -63,6 +70,13 @@ TOOLS = [
                 "enum": ["pending", "in_progress", "done", "blocked", "skipped"]},
             "detail": {"type": "string"},
         }, "required": ["key", "state"], "additionalProperties": False}
+    }},
+    {"type": "function", "function": {
+        "name": "wait_for_external",
+        "description": "Suspend this task for 10-86400 seconds while a website or external process finishes. The worker will re-observe the desktop when it wakes.",
+        "parameters": {"type": "object", "properties": {
+            "seconds": {"type": "integer"}, "reason": {"type": "string"}
+        }, "required": ["seconds", "reason"], "additionalProperties": False}
     }},
     {"type": "function", "function": {
         "name": "request_assistance",
@@ -90,6 +104,7 @@ class ModelConfig:
     max_steps: int
     max_seconds: int
     max_image_width: int
+    max_total_tokens: int = 250000
 
     @classmethod
     def from_env(cls, job: dict | None = None) -> "ModelConfig":
@@ -116,7 +131,10 @@ class ModelConfig:
         width = int(os.getenv("QBROWSER_SCREEN_WIDTH", "1280"))
         if not (1 <= steps <= 1000 and 10 <= seconds <= 86400 and 640 <= width <= 3840):
             raise ValueError("Invalid native agent limits")
-        return cls(provider, model, key, base_url, steps, seconds, width)
+        budget = int(os.getenv("QBROWSER_MAX_TOTAL_TOKENS", "250000"))
+        if not 1000 <= budget <= 10000000:
+            raise ValueError("QBROWSER_MAX_TOTAL_TOKENS must be between 1000 and 10 million")
+        return cls(provider, model, key, base_url, steps, seconds, width, budget)
 
 
 class CompatibleModel:
@@ -151,7 +169,11 @@ class CompatibleModel:
         # DeepSeek tool-calling rounds require the reasoning_content field.
         if self.config.provider == "deepseek" and getattr(message, "reasoning_content", None):
             assistant["reasoning_content"] = message.reasoning_content
-        return {"assistant": assistant, "calls": calls, "text": message.content or ""}
+        usage = response.usage
+        tokens = {"input": int(getattr(usage, "prompt_tokens", 0) or 0),
+                  "output": int(getattr(usage, "completion_tokens", 0) or 0)}
+        return {"assistant": assistant, "calls": calls, "text": message.content or "",
+                "usage": tokens}
 
 
 class Desktop:
@@ -327,6 +349,12 @@ def run_native(job: dict, store: JobStore, *, model: Any | None = None,
             history = compact(history)
             turn = model.ask(history)
             calls = turn.get("calls", [])
+            usage = turn.get("usage") or {}
+            used = store.record_usage(job["id"], int(usage.get("input", 0)),
+                                      int(usage.get("output", 0)))
+            if used["input_tokens"] + used["output_tokens"] > config.max_total_tokens:
+                return store.transition(job["id"], "needs_review", allowed={"running"},
+                    error="Model token budget exceeded; execution stopped before another GUI action")
             if store.get(job["id"])["stop_requested"]:
                 return store.transition(job["id"], "needs_review", allowed={"running"},
                                         error="Stop requested during model inference; no further action executed")
@@ -351,6 +379,9 @@ def run_native(job: dict, store: JobStore, *, model: Any | None = None,
                     raise ValueError("Finish requires result and on-screen evidence")
                 return store.transition(job["id"], "verify", allowed={"running"},
                                         result=f"{result[:2000]} | Evidence claimed: {evidence[:2000]}")
+            if name == "wait_for_external":
+                return store.wait_for(job["id"], args.get("seconds"),
+                                      str(args.get("reason", "")).strip())
             if name == "request_assistance":
                 reason = str(args.get("reason", "")).strip() or "Agent requested assistance"
                 return store.transition(job["id"], "needs_review", allowed={"running"},
@@ -361,6 +392,16 @@ def run_native(job: dict, store: JobStore, *, model: Any | None = None,
                                               args.get("state", ""), args.get("detail", ""))
                     output = f"Milestone saved: {marker['key']} = {marker['state']}"
                 elif name == "computer_action":
+                    action = args.get("action")
+                    if action in {"click", "double_click", "hotkey", "keypress", "type"}:
+                        impact = args.get("impact")
+                        purpose = args.get("purpose")
+                        if impact not in {"local", "external", "destructive"} or not isinstance(purpose, str) or not purpose.strip():
+                            return store.require_approval(job["id"],
+                                "Unclassified potentially consequential GUI action; inspect before continuing")
+                        if impact == "destructive" or (impact == "external" and not job["external_approved"]):
+                            return store.require_approval(job["id"],
+                                f"Proposed {impact} GUI action: {purpose[:400]}. No action performed.")
                     output = desktop.perform(args)
                     # No text payload, typed passwords or screenshot contents in the journal.
                     store.checkpoint(job["id"], "gui-action", "in_progress",
@@ -381,6 +422,6 @@ def run_native(job: dict, store: JobStore, *, model: Any | None = None,
                          error="Operator interrupted native execution; inspect desktop")
         raise
     except Exception as exc:
-        # Treat all interrupted actions as side-effect ambiguous; never blindly replay.
+        # Avoid persisting raw provider errors, which may contain URLs, request content or tokens.
         return store.transition(job["id"], "needs_review", allowed={"running"},
-                                error=f"{type(exc).__name__}: {str(exc)[:500]}")
+                                error=f"Native execution failed ({type(exc).__name__}); consult local diagnostics")

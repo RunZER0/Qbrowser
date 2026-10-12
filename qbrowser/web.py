@@ -6,6 +6,7 @@ import os
 import secrets
 
 from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi.responses import Response
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
@@ -15,6 +16,21 @@ from qbrowser.document_routes import router as document_router
 
 load_local_env()
 app = FastAPI(title="Qbrowser", version="0.1.0", docs_url="/docs")
+
+
+@app.middleware("http")
+async def document_upload_size_guard(request, call_next):
+    if request.method == "POST" and "/documents/upload/" in request.url.path:
+        raw = request.headers.get("content-length")
+        if raw is None:
+            return Response(status_code=411, content="Content-Length is required for uploads")
+        try:
+            size = int(raw)
+        except ValueError:
+            return Response(status_code=400, content="Invalid Content-Length")
+        if size > 101 * 1024 * 1024:
+            return Response(status_code=413, content="Document upload exceeds 100 MB")
+    return await call_next(request)
 
 
 def authenticate(authorization: str | None = Header(default=None)):

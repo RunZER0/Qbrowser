@@ -170,7 +170,17 @@ def worker(store: JobStore, *, once: bool = False, poll_seconds: float = 2.0):
         if interrupted:
             print(f"Recovered {interrupted} interrupted job(s) into needs_review.")
         print("Desktop worker active. Press Ctrl+C to stop after the current task.")
+        last_retention = 0.0
         while True:
+            retention = int(os.getenv("QBROWSER_ARTIFACT_RETENTION_DAYS", "0"))
+            if retention and time.monotonic() - last_retention > 86400:
+                from qbrowser.artifact_vault import purge_expired
+                try:
+                    outcome = purge_expired(store, days=retention, dry_run=False)
+                    print(f"Artifact retention removed {outcome['deleted_versions']} expired revisions")
+                except (ValueError, OSError) as exc:
+                    print(f"Artifact retention was not completed: {exc}")
+                last_retention = time.monotonic()
             store.wake_due()
             job = store.claim()
             if job:

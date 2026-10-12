@@ -28,6 +28,13 @@ def parser() -> argparse.ArgumentParser:
                  "approve-external"):
         cmd = s.add_parser(name)
         cmd.add_argument("id", help="Job ID")
+    ck = s.add_parser("checkpoint", help="Record a durable dynamic task milestone")
+    ck.add_argument("id")
+    ck.add_argument("key")
+    ck.add_argument("state", choices=["pending", "in_progress", "done", "blocked", "skipped"])
+    ck.add_argument("detail", nargs="?", default="")
+    cks = s.add_parser("checkpoints", help="Show milestone state for a job")
+    cks.add_argument("id")
     w = s.add_parser("worker", help="Start the exclusive local desktop operator")
     w.add_argument("--once", action="store_true", help="Execute at most one queued job")
     web = s.add_parser("serve", help="Start local dashboard and HTTP API")
@@ -93,6 +100,13 @@ def main(argv: list[str] | None = None) -> int:
         job = store.get(args.id)
     elif args.command == "events":
         print(json.dumps(store.events(args.id), indent=2, ensure_ascii=False))
+        return 0
+    elif args.command == "checkpoints":
+        print(json.dumps(store.checkpoints(args.id), indent=2, ensure_ascii=False))
+        return 0
+    elif args.command == "checkpoint":
+        print(json.dumps(store.checkpoint(args.id, args.key, args.state, args.detail),
+                         indent=2, ensure_ascii=False))
         return 0
     elif args.command == "requeue":
         job = store.transition(args.id, "queued",

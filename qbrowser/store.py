@@ -81,11 +81,18 @@ class JobStore:
                     PRIMARY KEY(job_id, key)
                 );
             """)
+            existing = {row["name"] for row in db.execute("PRAGMA table_info(jobs)")}
+            for field in ("engine", "provider", "model"):
+                if field not in existing:
+                    db.execute(f"ALTER TABLE jobs ADD COLUMN {field} TEXT")
+            if "stop_requested" not in existing:
+                db.execute("ALTER TABLE jobs ADD COLUMN stop_requested INTEGER NOT NULL DEFAULT 0")
 
     @staticmethod
     def _job(row: sqlite3.Row) -> dict[str, Any]:
         item = dict(row)
         item["external_approved"] = bool(item["external_approved"])
+        item["stop_requested"] = bool(item.get("stop_requested", 0))
         return item
 
     @staticmethod
@@ -95,20 +102,31 @@ class JobStore:
             (job_id, utcnow(), kind, json.dumps(payload, ensure_ascii=False)),
         )
 
-    def create(self, instruction: str, *, priority: int = 0, external_approved: bool = False) -> dict:
+    def create(self, instruction: str, *, priority: int = 0,
+               external_approved: bool = False, engine: str | None = None,
+               provider: str | None = None, model: str | None = None) -> dict:
         instruction = instruction.strip()
         if not instruction or len(instruction) > 50000:
             raise ValueError("Instruction must contain 1–50000 characters")
+        if engine not in (None, "native", "agent_s"):
+            raise ValueError("Unsupported execution engine")
+        if provider not in (None, "zai", "deepseek", "custom"):
+            raise ValueError("Unsupported provider")
+        if model is not None and (not model.strip() or len(model) > 120):
+            raise ValueError("Invalid model identifier")
         ident = uuid.uuid4().hex[:12]
         stamp = utcnow()
         with self._connection() as db:
             db.execute(
-                """INSERT INTO jobs(id,instruction,priority,external_approved,created_at,updated_at)
-                   VALUES(?,?,?,?,?,?)""",
-                (ident, instruction, int(priority), int(external_approved), stamp, stamp),
+                """INSERT INTO jobs(id,instruction,priority,external_approved,created_at,updated_at,
+                                    engine,provider,model)
+                   VALUES(?,?,?,?,?,?,?,?,?)""",
+                (ident, instruction, int(priority), int(external_approved), stamp, stamp,
+                 engine, provider, model),
             )
             self._event(db, ident, "created", priority=int(priority),
-                        external_approved=bool(external_approved))
+                        external_approved=bool(external_approved), engine=engine,
+                        provider=provider, model=model)
         return self.get(ident)
 
     def get(self, job_id: str) -> dict:
@@ -149,7 +167,7 @@ class JobStore:
             stamp = utcnow()
             db.execute(
                 """UPDATE jobs SET status='running', attempt=attempt+1,
-                   updated_at=?, started_at=?, finished_at=NULL, last_error=NULL
+                   updated_at=?, started_at=?, finished_at=NULL, last_error=NULL, stop_requested=0
                    WHERE id=? AND status='queued'""",
                 (stamp, stamp, row["id"]),
             )
@@ -181,6 +199,26 @@ class JobStore:
             )
             self._event(db, job_id, "status", previous=row["status"], current=to,
                         error=error, result=result, log_path=log_path)
+            db.execute("COMMIT")
+        return self.get(job_id)
+
+    def request_stop(self, job_id: str) -> dict:
+        """Cooperative stop; the active worker handles the in-flight GUI action."""
+        with self._connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT status,stop_requested FROM jobs WHERE id=?", (job_id,)).fetchone()
+            if row is None:
+                raise KeyError(job_id)
+            if row["status"] in FINAL:
+                raise ValueError("Job already finished")
+            if row["status"] == "running":
+                db.execute("UPDATE jobs SET stop_requested=1,updated_at=? WHERE id=?",
+                           (utcnow(), job_id))
+                self._event(db, job_id, "stop_requested")
+            else:
+                db.execute("UPDATE jobs SET status='cancelled',updated_at=?,finished_at=? WHERE id=?",
+                           (utcnow(), utcnow(), job_id))
+                self._event(db, job_id, "status", previous=row["status"], current="cancelled")
             db.execute("COMMIT")
         return self.get(job_id)
 

@@ -73,7 +73,9 @@ def agent_command(job: dict) -> list[str]:
     if key_name and not os.getenv(key_name):
         raise RuntimeError(f"{key_name} is required for {provider}")
     instruction = STOP_BEFORE + (YES_EXTERNAL if job["external_approved"] else NO_EXTERNAL)
-    instruction += "Perform the following task via the screen: " + job["instruction"]
+    from qbrowser.artifacts import workspace
+    instruction += ("Save final local output files in " + str(workspace(job["id"])) +
+                    ". Perform the following task via the screen: " + job["instruction"])
     args = [
         binary, "--provider", provider, "--model", model,
         "--task", instruction,
@@ -125,6 +127,17 @@ def execute(job: dict, store: JobStore) -> dict:
                     except subprocess.TimeoutExpired:
                         log.flush()
                         store.heartbeat(job["id"], log_bytes=path.stat().st_size)
+                        if store.get(job["id"])["stop_requested"]:
+                            process.terminate()
+                            try:
+                                process.wait(timeout=5)
+                            except subprocess.TimeoutExpired:
+                                process.kill()
+                                process.wait()
+                            return store.transition(job["id"], "needs_review",
+                                allowed={"running"},
+                                error="Stop requested; Agent-S terminated with unknown GUI effects",
+                                log_path=str(path))
             except KeyboardInterrupt:
                 process.terminate()
                 try:
@@ -136,6 +149,9 @@ def execute(job: dict, store: JobStore) -> dict:
                     error="Operator interrupted desktop task; screen state unknown",
                     log_path=str(path))
                 raise
+        if store.get(job["id"])["stop_requested"]:
+            return store.transition(job["id"], "needs_review", allowed={"running"},
+                error="Stopped after Agent-S ended; inspect screen", log_path=str(path))
         if code == 0:
             return store.transition(job["id"], "verify", allowed={"running"},
                 result="GUI process exited successfully. Verify actual on-screen outcome.",
@@ -158,7 +174,28 @@ def worker(store: JobStore, *, once: bool = False, poll_seconds: float = 2.0):
             job = store.claim()
             if job:
                 print(f"Running {job['id']} (attempt {job['attempt']})")
-                result = execute(job, store)
+                engine = (job.get("engine") or os.getenv("QBROWSER_ENGINE", "native")).strip().lower()
+                if engine == "native":
+                    try:
+                        from qbrowser.native import run_native
+                        result = run_native(job, store)
+                    except KeyboardInterrupt:
+                        raise
+                    except Exception as exc:
+                        result = store.transition(job["id"], "needs_review",
+                            allowed={"running"}, error=f"Native startup failure: {type(exc).__name__}: {str(exc)[:500]}")
+                elif engine == "agent_s":
+                    result = execute(job, store)
+                else:
+                    result = store.transition(job["id"], "needs_review",
+                        allowed={"running"}, error="Unknown QBROWSER_ENGINE setting")
+                from qbrowser.artifacts import index_outputs
+                try:
+                    indexed = index_outputs(store, job["id"])
+                    if indexed:
+                        print(f"{job['id']}: indexed {len(indexed)} output file(s)")
+                except (OSError, ValueError) as exc:
+                    print(f"{job['id']}: output indexing issue: {exc}")
                 print(f"{job['id']}: {result['status']}")
             elif once:
                 return

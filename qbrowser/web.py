@@ -30,6 +30,9 @@ class NewJob(BaseModel):
     instruction: str = Field(min_length=1, max_length=50000)
     priority: int = 0
     external_approved: bool = False
+    engine: str | None = None
+    provider: str | None = None
+    model: str | None = None
 
 
 def safe(action):
@@ -49,12 +52,19 @@ def list_jobs():
 @app.post("/api/jobs", status_code=201, dependencies=[Depends(authenticate)])
 def create_job(request: NewJob):
     return safe(lambda: store().create(request.instruction,
-                 priority=request.priority, external_approved=request.external_approved))
+                 priority=request.priority, external_approved=request.external_approved,
+                 engine=request.engine, provider=request.provider, model=request.model))
 
 
 @app.get("/api/jobs/{job_id}", dependencies=[Depends(authenticate)])
 def get_job(job_id: str):
     return safe(lambda: store().get(job_id))
+
+
+@app.get("/api/jobs/{job_id}/artifacts", dependencies=[Depends(authenticate)])
+def job_artifacts(job_id: str):
+    from qbrowser.artifacts import artifacts
+    return safe(lambda: artifacts(store(), job_id))
 
 
 @app.get("/api/jobs/{job_id}/events", dependencies=[Depends(authenticate)])
@@ -91,6 +101,11 @@ def verified(job_id: str):
                  result="Operator verified the final outcome"))
 
 
+@app.post("/api/jobs/{job_id}/stop", dependencies=[Depends(authenticate)])
+def stop_job(job_id: str):
+    return safe(lambda: store().request_stop(job_id))
+
+
 @app.post("/api/jobs/{job_id}/pause", dependencies=[Depends(authenticate)])
 def pause(job_id: str):
     return safe(lambda: store().transition(job_id, "paused", allowed={"queued"}))
@@ -113,8 +128,9 @@ HTML = r"""<!doctype html>
 <style>
 :root{font:15px system-ui,sans-serif;color-scheme:dark;background:#101521;color:#e5e9f2}
 *{box-sizing:border-box}body{max-width:1000px;margin:auto;padding:2rem 1rem}
-h1{font-size:1.8rem}p,.meta{color:#9ca9bb}textarea,input,button{font:inherit}
-textarea,input{width:100%;border:1px solid #425169;border-radius:8px;padding:12px;background:#192334;color:white}
+h1{font-size:1.8rem}p,.meta{color:#9ca9bb}textarea,input,button,select{font:inherit}
+textarea,input,select{border:1px solid #425169;border-radius:8px;padding:12px;background:#192334;color:white}
+textarea,input{width:100%}
 textarea{min-height:95px;resize:vertical}
 button{background:#263a59;border:1px solid #47638a;color:white;padding:8px 13px;border-radius:7px;cursor:pointer}
 button:hover{background:#365479}button:disabled{opacity:.5}
@@ -131,6 +147,11 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#0b1421;padding:12px;
 <section class="panel">
 <label>Local API bearer token (only if configured) <input id="token" type="password" autocomplete="off" placeholder="Leave blank otherwise"></label>
 <label>Task instructions<textarea id="instruction" placeholder="Describe any task to perform on this computer..."></textarea></label>
+<div class="row">
+<label>Engine <select id="engine"><option value="native">Native multimodal</option><option value="agent_s">Agent S3</option></select></label>
+<label>Model provider <select id="provider"><option value="zai">Z.ai GLM</option><option value="deepseek">DeepSeek</option><option value="custom">Custom compatible</option></select></label>
+<label>Model override (optional) <input id="model" type="text" placeholder="Default for provider"></label>
+</div>
 <label><input id="approve" type="checkbox" style="width:auto"> Approve external submissions/actions for this job</label>
 <button id="submit">Queue task</button><span id="error" role="alert"></span>
 </section>
@@ -164,13 +185,14 @@ async function refresh(){
   for(const j of jobs){
    const card=el('article',undefined,'job');
    card.append(el('div',j.status+' · '+j.id,'status'),el('p',j.instruction,'instruction'));
-   card.append(el('small','Attempt '+j.attempt+' · Created '+j.created_at));
+   card.append(el('small','Attempt '+j.attempt+' · '+(j.engine||'native')+' / '+(j.provider||'configured default')+' · Created '+j.created_at));
    if(j.last_error)card.append(el('pre',j.last_error));
    if(j.result)card.append(el('pre',j.result));
    const bar=el('div',undefined,'row');
    const actions = j.status==='verify'?[['verified','Mark verified']]
     :['needs_review','paused','waiting_approval','failed'].includes(j.status)?[['requeue','Requeue']]
-    :j.status==='queued'?[['pause','Pause'],['cancel','Cancel']]:[];
+    :j.status==='queued'?[['pause','Pause'],['cancel','Cancel']]
+    :j.status==='running'&&!j.stop_requested?[['stop','Request stop']]:[];
    if(!j.external_approved&&j.status!=='running')actions.push(['approve-external','Approve external actions']);
    for(const [k,v] of actions){const b=el('button',v);b.onclick=()=>action(k,j.id,v);bar.append(b);}
    const stages=el('button','Milestones');stages.onclick=async()=>{
@@ -178,6 +200,11 @@ async function refresh(){
       alert(stages.length?JSON.stringify(stages,null,2):'No milestones recorded');}
     catch(e){$('error').textContent=e.message;}
    };bar.append(stages);
+   const artifacts=el('button','Files');artifacts.onclick=async()=>{
+    try{let data=await api('/api/jobs/'+j.id+'/artifacts');
+     alert(data.length?JSON.stringify(data,null,2):'No output files indexed yet');}
+    catch(e){$('error').textContent=e.message;}
+   };bar.append(artifacts);
    const log=el('button','Events');log.onclick=async()=>{
     try{let events=await api('/api/jobs/'+j.id+'/events');alert(JSON.stringify(events,null,2));}
     catch(e){$('error').textContent=e.message;}
@@ -188,7 +215,7 @@ async function refresh(){
 }
 $('submit').onclick=async()=>{
  const instruction=$('instruction').value.trim();if(!instruction)return;
- try{await api('/api/jobs','POST',{instruction,external_approved:$('approve').checked});
+ try{await api('/api/jobs','POST',{instruction,external_approved:$('approve').checked,engine:$('engine').value,provider:$('provider').value,model:$('model').value.trim()||null});
  $('instruction').value='';$('approve').checked=false;await refresh();}
  catch(e){$('error').textContent=e.message;}
 };

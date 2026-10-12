@@ -50,6 +50,16 @@ class APITests(unittest.TestCase):
         self.assertEqual(r.status_code, 200, r.text)
         self.assertEqual(self.client.get(path, headers=self.headers).json()[0]["state"], "done")
 
+    def test_select_model_and_stop_via_api(self):
+        r = self.client.post("/api/jobs", json={"instruction": "Use DeepSeek",
+                "engine": "native", "provider": "deepseek", "model": "deepseek-flash"},
+                headers=self.headers)
+        self.assertEqual(r.status_code, 201, r.text)
+        job = r.json()
+        self.assertEqual(job["provider"], "deepseek")
+        r = self.client.post(f"/api/jobs/{job['id']}/stop", headers=self.headers)
+        self.assertEqual(r.json()["status"], "cancelled")
+
     def test_unsafe_state_rejected(self):
         response = self.client.post("/api/jobs", json={"instruction": "Process documents"},
                                     headers=self.headers)

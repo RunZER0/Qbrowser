@@ -64,6 +64,7 @@ class StoreTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.store.approve_external(job["id"])
         self.store.recover_interrupted()
+        self.store.transition(job["id"], "queued", allowed={"needs_review"})
         self.assertTrue(self.store.approve_external(job["id"])["external_approved"])
 
     def test_dynamic_checkpoints_survive_restart(self):
@@ -79,6 +80,74 @@ class StoreTests(unittest.TestCase):
             self.store.checkpoint(job["id"], "review", "invalid")
         with self.assertRaises(ValueError):
             self.store.checkpoint(job["id"], "../outside", "done")
+
+    def test_plan_prerequisites_completion_and_restart(self):
+        job = self.store.create("Research and draft")
+        self.store.claim()
+        plan = self.store.set_plan(job["id"], [
+            {"key": "research", "title": "Research", "acceptance": "Evidence is recorded"},
+            {"key": "draft", "title": "Draft", "acceptance": "Draft is saved",
+             "depends_on": ["research"]},
+        ])
+        self.assertEqual(plan["version"], 1)
+        with self.assertRaisesRegex(ValueError, "prerequisite"):
+            self.store.update_plan_item(job["id"], "draft", "in_progress")
+        self.store.update_plan_item(job["id"], "research", "in_progress")
+        self.store.update_plan_item(job["id"], "research", "done", "Sources recorded")
+        self.store.update_plan_item(job["id"], "draft", "in_progress")
+        with self.assertRaisesRegex(ValueError, "unfinished"):
+            self.store.assert_plan_complete(job["id"])
+        reopened = JobStore(self.store.path)
+        self.assertEqual(reopened.plan(job["id"])["items"][1]["state"], "in_progress")
+        reopened.update_plan_item(job["id"], "draft", "done", "Draft saved locally")
+        reopened.assert_plan_complete(job["id"])
+        self.assertEqual(reopened.plan(job["id"])["percent"], 100)
+
+    def test_action_journal_requires_plan_and_marks_uncertain_intent(self):
+        job = self.store.create("Open a local editor")
+        self.store.claim()
+        with self.assertRaisesRegex(ValueError, "mandatory task plan"):
+            self.store.begin_action(job["id"], "click", "local", "Open editor", {"x": 3})
+        self.store.set_plan(job["id"], [
+            {"key": "open", "title": "Open editor", "acceptance": "Editor is visible"},
+        ])
+        self.store.update_plan_item(job["id"], "open", "in_progress")
+        action_id = self.store.begin_action(job["id"], "click", "local", "Open editor",
+                                            {"x": 3, "text": "private text"})
+        pending = JobStore(self.store.path).action_history(job["id"])[0]
+        self.assertEqual(pending["state"], "started")
+        self.assertNotIn("text", pending["details"])
+        self.store.finish_action(action_id, error_type="OSError")
+        entry = self.store.action_history(job["id"])[0]
+        self.assertEqual((entry["state"], entry["error_type"]), ("failed", "OSError"))
+
+    def test_crash_marks_in_flight_gui_action_unknown(self):
+        job = self.store.create("Click the save button")
+        self.store.claim()
+        self.store.set_plan(job["id"], [
+            {"key": "save", "title": "Save the file", "acceptance": "The file appears on disk"},
+        ])
+        self.store.update_plan_item(job["id"], "save", "in_progress")
+        self.store.begin_action(job["id"], "click", "local", "Click save", {"x": 50, "y": 20})
+        self.assertEqual(self.store.recover_interrupted(), 1)
+        self.assertEqual(self.store.get(job["id"])["status"], "needs_review")
+        self.assertEqual(self.store.action_history(job["id"])[0]["state"], "unknown")
+
+    def test_working_memory_persists_and_action_messages_resume_waiting_job(self):
+        job = self.store.create("Prepare a report")
+        self.store.claim()
+        memory = self.store.update_working_memory(
+            job["id"], summary="Research is complete", findings=["Source A supports the claim"],
+            decisions=["Use the short format"], open_questions=["Confirm the date"])
+        reopened = JobStore(self.store.path)
+        self.assertEqual(memory["version"], 1)
+        self.assertEqual(reopened.working_memory(job["id"])["findings"],
+                         ["Source A supports the claim"])
+        waiting = self.store.ask_user(job["id"], "Which date should the report use?")
+        self.assertEqual(waiting["status"], "waiting_user")
+        answered = self.store.add_message(job["id"], "user", "Use 12 October.")
+        self.assertEqual(self.store.get(job["id"])["status"], "queued")
+        self.assertEqual(self.store.messages(job["id"])[-1]["seq"], answered["seq"])
 
     def test_stop_running_job_is_persistent(self):
         job = self.store.create("Do something")
@@ -124,11 +193,18 @@ class StoreTests(unittest.TestCase):
     def test_usage_is_transactional_and_nonnegative(self):
         job = self.store.create("Model job")
         self.store.claim()
-        self.store.record_usage(job["id"], 120, 30)
-        usage = self.store.record_usage(job["id"], 22, 8)
+        self.store.record_usage(job["id"], 120, 30, estimated=True, cost_usd=0.004)
+        self.store.record_model_latency(job["id"], 125)
+        usage = self.store.record_usage(job["id"], 22, 8, cost_usd=0.001)
         self.assertEqual((usage["input_tokens"], usage["output_tokens"]), (142,38))
+        self.assertEqual(usage["estimated_tokens"], 150)
+        self.assertEqual(usage["model_latency_ms"], 125)
+        self.assertAlmostEqual(usage["estimated_cost_usd"], 0.005)
+        self.assertTrue(usage["cost_configured"])
         with self.assertRaises(ValueError):
             self.store.record_usage(job["id"], -1, 1)
+        with self.assertRaises(ValueError):
+            self.store.record_usage(job["id"], 1, 1, cost_usd=float("inf"))
 
     def test_persists_between_instances(self):
         job = self.store.create("Make a document")

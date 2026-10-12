@@ -47,16 +47,21 @@ def probe(model: object | None = None, config: ModelConfig | None = None) -> dic
 
 def probe_desktop() -> dict:
     """Check real host screenshot and coordinate conversion without clicking anything."""
-    from qbrowser.native import Desktop
-
-    desk = Desktop()
-    _image, (width, height) = desk.observe()
-    center = desk.position({"x": width // 2, "y": height // 2})
-    return {
-        "status": "passed",
-        "scaled_screenshot": [width, height],
-        "desktop_resolution": list(desk.last_actual or (0, 0)),
-        "logical_center": list(center),
-        "gui_executed": False,
-        "note": "Screenshot and coordinate mapping checked. Mouse/keyboard untested."
-    }
+    try:
+        from qbrowser.native import Desktop
+        desk = Desktop()
+        _image, (width, height) = desk.observe()
+        center = desk.position({"x": width // 2, "y": height // 2})
+        return {
+            "status": "passed",
+            "scaled_screenshot": [width, height],
+            "desktop_resolution": list(desk.last_actual or (0, 0)),
+            "logical_center": list(center),
+            "gui_executed": False,
+            "note": "Screenshot and coordinate mapping checked. Mouse/keyboard untested."
+        }
+    except Exception as exc:
+        reason = ("No graphical display is available" if isinstance(exc, KeyError) and
+                  exc.args == ("DISPLAY",) else
+                  f"Desktop screenshot unavailable ({type(exc).__name__})")
+        return {"status": "blocked", "error": reason, "gui_executed": False}

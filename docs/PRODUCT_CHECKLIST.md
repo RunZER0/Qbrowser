@@ -32,17 +32,51 @@ Legend: **REUSE** = adopt maintained implementation; **ADAPT** = integrate or ta
 | 24 | Security threat model | Prompt injection, malicious pages, unsafe clicks, exfiltration, isolate user profiles | REUSE published computer-use guidance; BUILD policy | Security review with hostile website test |
 | 25 | Production operations | Backup/restore, log rotation, diagnostics, hardware/network failure, upgrades | BUILD | Multi-day unattended reliability trial |
 
-## Section 14 implementation
+## 24-domain progress checkpoint
 
-The document/artifact subsystem now includes input upload and output discovery, bounded format inspection, DOCX/PDF/XLSX/PPTX generators, text/CSV conversion, immutable hash snapshots, parent revision lineage, quality issue reports, authenticated previews/downloads and opt-in retention. See [documents](DOCUMENTS.md) for the exact supported conversion/preview matrix. Office layout-preserving PDF conversion and factual source existence verification remain separate GUI/research workflows.
+This is the running checkpoint for implementation work. The table above preserves the original 25 workstreams; this rollup combines security and production operations into domain 24. `[x]` means the local implementation exists and has a relevant test or inspection; `[~]` means implemented in part or still awaiting environment validation; `[ ]` means outstanding. These are not public-release certifications.
+
+| # | Domain | Current checkpoint | Next acceptance gate |
+|---|---|---|---|
+| 01 | Agent architecture | [x] Native screenshot/action/observe loop. [x] Agent-S retained as an optional backend. | [ ] Supervised end-to-end task on a real desktop using each selected engine. |
+| 02 | Multimodal providers | [x] Z.ai, DeepSeek and compatible endpoint adapters; synthetic image/tool smoke probe. [~] Token usage and rough fallback estimates are recorded. | [ ] Authenticated vision/tool-call runs on each intended provider and model. |
+| 03 | Desktop actions | [x] Validated PyAutoGUI input, coordinate scaling, fail-safe, bounded waits and key names. | [ ] Validate screenshots, Unicode, paste, multi-monitor and high-DPI behavior per OS/session. |
+| 04 | Browser and applications | [x] Native path operates via visible GUI, without site-specific API scripts. | [ ] Complete supervised multi-app workflows with authenticated and file-dialog states. |
+| 05 | Planning and progress | [x] Versioned dependency plan, acceptance conditions, progress evidence and finish gate. [x] 100-action simulated run. | [ ] Benchmark incomplete-result detection and plan revisions on real tasks. |
+| 06 | Long contexts and memory | [x] Bounded complete-turn compaction and persisted findings/decisions/questions; runtime cadence gates. | [ ] Validate on long real tasks and provider context limits. |
+| 07 | Durable persistence | [x] SQLite WAL jobs, events, plans, messages, working memory, action journal, evidence metadata and migrations. | [ ] Rehearse upgrades from every released schema and inspect backup/restore integrity. |
+| 08 | Crash recovery | [x] Started GUI actions become unknown after interruption; jobs go to review and are not replayed. | [ ] Kill/restart during a real submission and verify no duplicate side effect. |
+| 09 | Concurrency | [x] Atomic SQLite claim and exclusive cross-process desktop lock. | [ ] Exercise multiple queue producers and worker restarts on Windows, macOS and Linux. |
+| 10 | Approval and scope | [x] Unapproved model-declared external actions pause; destructive native actions are blocked. [~] Approval remains job-scoped and classification remains model-declared. | [ ] Independent action classification and approval scoped to the proposed action. |
+| 11 | Secrets and private data | [x] Environment-based provider keys, local API token, redacted typed text, optional AES-GCM evidence. [~] Job text and memory remain in local SQLite. | [ ] Review permissions, backups, clipboard handling, retention and key rotation on host OSs. |
+| 12 | Dashboard and API | [x] Loopback job queue, plan, messages, action history, artifacts, evidence and stop/review controls. | [ ] Manual desktop/mobile usability, auth/error handling and accessibility review. |
+| 13 | Messaging | [x] OpenClaw handoff skill and manually confirmed verified-file delivery. [~] No authenticated inbound WhatsApp receiver in Qbrowser. | [ ] Owner allowlist, inbound task auth, acknowledgements and end-to-end paired account test. |
+| 14 | Files and artifacts | [x] Per-job workspace, output indexing and hashes. | [ ] Versioned revisions, cleanup/retention policy and tested restore for outputs. |
+| 15 | Verification and evidence | [x] Plan completion evidence, `verify` status and operator-confirmed completion. [~] Encrypted screenshot evidence is opt-in. | [ ] Independent outcome verifier and benchmarked evidence quality. |
+| 16 | Observability | [x] Redacted action intent/result journal, events, errors, token totals and model latency. [~] Dollar totals require user-configured rates; missing usage is estimated. | [ ] Confirm actionable diagnostics without exposing provider payloads or private screen data. |
+| 17 | Cancellation | [x] Cooperative native stop checks; Agent-S timeout and process termination. | [ ] Test stop during slow inference, desktop action, OS prompt and worker shutdown on all OSs. |
+| 18 | Installation and diagnostics | [x] Bootstrap, doctor, provider smoke and screenshot-only desktop smoke commands. | [ ] Fresh setup and permissions checks on physical Windows/macOS/Linux machines. |
+| 19 | Tests and CI | [x] Local Linux run: 130 tests and 5 subtests, compileall, dependency check and CI lint selection pass. [x] CI matrix configured for Python 3.11/3.12 on three OSs. | [ ] Confirm hosted matrix result and execute actual desktop/provider integration tests. |
+| 20 | Packaging and upgrades | [x] Python package metadata, optional dependency groups and schema migration. [~] No signed native installer/update path. | [ ] License/dependency notice review, reproducible release, upgrade test and signed artifacts. |
+| 21 | Extensible executors | [x] Native and Agent-S execution remain behind the existing job/worker selection. | [ ] Add another mature executor through a stable adapter and contract test. |
+| 22 | Waiting and scheduling | [x] Persisted waits wake on restart and reobserve the live screen. [~] No external event scheduler or periodic task service. | [ ] Add/test event-driven resume only if required; validate wake timing under restart. |
+| 23 | Budgets and reliability | [x] Per-job action/step/time/token ceilings, usage records, optional configured price estimate, bounded provider retries. | [ ] Validate provider-specific budgets, failure backoff and multi-day reliability without replay. |
+| 24 | Security and production operations | [x] Threat model, loopback default, SQLite backup and review gates documented. [~] Model labels are not a security boundary. | [ ] Hostile-page audit, independent security review, restore drill, log rotation and multi-day soak. |
+
+### Work log
+
+- 2026-10-12: Imported upstream main snapshot `73dccbe` into a local `codex/local-finish` branch. No remote changes were sent.
+- 2026-10-12: Added durable plans, working memory, conversation steering, action intent/result records, encrypted opt-in screenshot evidence, UI/API inspection paths and a 100-action synthetic regression test.
+- 2026-10-12: Added token/latency recording, rough usage fallback when an endpoint omits usage, and optional dollar estimates from user-configured per-million-token rates.
+- 2026-10-12: Full local suite passed: 130 tests and 5 subtests. `compileall`, `pip check`, `git diff --check`, and the CI-selected Ruff rules passed. Document routes are mounted behind API authentication and enforce the request-size limit. Real provider and GUI validation remain open.
 
 ## Current implementation evidence
 
-**Completed in code and simulated tests:** native multimodal action adapter; dynamic milestones; SQLite WAL task journal and model-token usage; exclusive desktop lease; bounded context, steps and wall-clock; stop-before-action checks for declared external operations; persisted approval and wait/wake states; per-job output hashing; cooperative cancellation; optional owner-confirmed WhatsApp file delivery; SQLite online backup; random default local API authentication token; a provider image/tool-call smoke probe and a local screenshot/DPI smoke probe.
+**Implemented and locally tested:** native multimodal action adapter; dynamic plans with completion evidence; SQLite WAL state and action journal; persisted working memory and owner messages; encrypted opt-in evidence; exclusive desktop lease; bounded context, steps, wall-clock and token totals; cancellation; per-job output hashes; persisted waiting and wake-up; explicit operator verification; optional owner-confirmed OpenClaw delivery; SQLite online backup; local API token support; synthetic provider and screenshot smoke probes; model usage and latency records.
 
-**Cross-platform validation:** automated unit/API/security-contract tests pass on Python 3.11 and 3.12 for Windows, macOS and Linux. Native dependency installation is separately checked on Windows, macOS and Linux. All tests are headless: they do not demonstrate functional mouse/keyboard use on a logged-in desktop.
+**Cross-platform validation:** CI is configured for Python 3.11/3.12 on Windows, macOS and Linux, plus native dependency installation on all three. This local run executed on Linux only. Tests are headless and do not demonstrate functional mouse/keyboard use on a logged-in desktop.
 
-**Still blocked for public unattended release:** live inference-provider vision/tool-call validation with the actual owner keys; logged-in Windows/macOS/Linux GUI smoke; safe treatment of misclassified consequential clicks (model labels cannot be treated as an independent security boundary); authenticated WhatsApp intake with actual paired account; independent results verification; output revision preservation and restore tooling; signed installers/updates; multi-day soak/security validation. The current release is a supervised local beta candidate, not production certification.
+**Still open for public unattended release:** live inference-provider vision/tool-call validation; logged-in Windows/macOS/Linux GUI smoke; safer action-scoped approval and independent checks for consequential actions; authenticated WhatsApp intake with paired owner account; independent result verification; output revision preservation and restore tooling; signed installers/updates; multi-day soak and security review. The current release is a supervised local beta candidate, not production certification.
 
 ## Release phases
 
@@ -73,3 +107,5 @@ The document/artifact subsystem now includes input upload and output discovery, 
 - Z.ai quickstart: https://docs.z.ai/guides/overview/quick-start — multimodal provider compatibility
 - DeepSeek vision guide: https://api-docs.deepseek.com/guides/vision/ — image input and valid model ID
 - DeepSeek tool calls: https://api-docs.deepseek.com/guides/tool_calls/
+- LangGraph persistence and memory concepts: https://docs.langchain.com/oss/python/langgraph/persistence — adapted concepts for checkpoints and memory; Qbrowser does not add LangGraph as a runtime dependency.
+- Temporal workflow execution: https://docs.temporal.io/workflow-execution — durable event-history reference; Qbrowser keeps its smaller local SQLite state machine rather than adding a remote workflow service.

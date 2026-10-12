@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "qbrowser-agent"
 version = "0.1.0"
-description = "Durable local job manager for Agent-S graphical computer automation"
+description = "Durable local-first AI computer operator with multimodal and Agent-S engines"
 requires-python = ">=3.11"
 dependencies = []
 
@@ -14,7 +14,11 @@ server = ["fastapi>=0.110,<1", "uvicorn>=0.29,<1", "python-multipart>=0.0.9,<1"]
 documents = ["python-docx>=1.1,<2", "openpyxl>=3.1,<4", "python-pptx>=1.0,<2", "reportlab>=4.2,<5", "pymupdf>=1.24,<2", "Pillow>=10,<13"]
 native = ["openai>=1.70,<3", "pyautogui>=0.9.54", "Pillow>=10", "pyperclip>=1.9"]
 desktop = ["gui-agents>=0.2"]
-dev = ["pytest>=8", "httpx>=0.27", "fastapi>=0.110,<1", "ruff>=0.11", "Pillow>=10"]
+browser = ["playwright>=1.49,<2"]
+memory = ["fastembed>=0.7,<1"]
+evidence = ["cryptography>=42,<47"]
+keyring = ["keyring>=25,<27"]
+dev = ["pytest>=8", "httpx>=0.27", "fastapi>=0.110,<1", "ruff>=0.11", "Pillow>=10", "cryptography>=42,<47"]
 
 [project.scripts]
 qbrowser = "qbrowser.cli:main"

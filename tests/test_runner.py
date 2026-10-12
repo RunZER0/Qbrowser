@@ -1,12 +1,13 @@
 """Tests for GUI command safety and subprocess integration without Agent-S installed."""
 
 from pathlib import Path
+from io import BytesIO
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 import os
 import unittest
 
-from qbrowser.runner import agent_command, execute
+from qbrowser.runner import _copy_limited_output, agent_command, desktop_lock, execute, prune_logs
 from qbrowser.store import JobStore
 
 
@@ -56,6 +57,43 @@ class RunnerTests(unittest.TestCase):
             done = execute(claimed, self.store)
         self.assertEqual(done["status"], "needs_review")
         self.assertIsNone(self.store.claim())
+
+    def test_child_output_is_capped_and_drained(self):
+        log = BytesIO()
+        _copy_limited_output(BytesIO(b"x" * 10000), log, 2048)
+        self.assertLessEqual(len(log.getvalue()), 2048)
+        self.assertIn(b"output omitted", log.getvalue())
+
+    def test_log_retention_only_removes_old_regular_log_files(self):
+        root = Path(self.tmp.name) / "logs"
+        root.mkdir()
+        old_log = root / "old.log"
+        old_log.write_text("old", encoding="utf-8")
+        fresh_log = root / "fresh.log"
+        fresh_log.write_text("fresh", encoding="utf-8")
+        unrelated = root / "old.txt"
+        unrelated.write_text("keep", encoding="utf-8")
+        import time
+        old_stamp = time.time() - 2 * 86400
+        os.utime(old_log, (old_stamp, old_stamp))
+        os.utime(unrelated, (old_stamp, old_stamp))
+        self.assertEqual(prune_logs(root, retention_days=1), 1)
+        self.assertFalse(old_log.exists())
+        self.assertTrue(fresh_log.exists())
+        self.assertTrue(unrelated.exists())
+
+    def test_isolated_desktop_identities_can_run_separate_workers(self):
+        first = desktop_lock("display-one")
+        second = desktop_lock("display-two")
+        first.__enter__()
+        try:
+            second.__enter__()
+            second.__exit__(None, None, None)
+            with self.assertRaisesRegex(RuntimeError, "Another Qbrowser"):
+                with desktop_lock("display-one"):
+                    pass
+        finally:
+            first.__exit__(None, None, None)
 
 
 if __name__ == "__main__":

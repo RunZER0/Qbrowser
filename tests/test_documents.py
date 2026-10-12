@@ -13,7 +13,7 @@ import pytest
 
 from qbrowser.artifact_vault import (
     create_output, convert_output, get_revision, list_revisions, open_snapshot,
-    purge_expired, record_file, safe_name, sync_outputs,
+    purge_expired, record_file, restore_revision, safe_name, sync_outputs,
 )
 from qbrowser.document_engine import create_document, extract_text, inspect_document, preview_png
 from qbrowser.store import JobStore
@@ -66,6 +66,40 @@ def test_docx_create_and_version_lineage(setup_job):
         "title": "Corporate Governance Revised",
         "blocks": [{"type": "paragraph", "text": "The second, reviewed version."}],
     })["version"] == 2
+
+
+def test_restore_historical_revision_creates_new_version(setup_job):
+    store, job, root = setup_job
+    first = create_output(store, job, "restore.txt", {"text": "Original draft"})
+    second = create_output(store, job, "restore.txt", {"text": "Revised draft"})
+    with pytest.raises(ValueError, match="Pause or finish"):
+        restore_revision(store, job, "output", "restore.txt", 1)
+    with store._connection() as db:
+        db.execute("UPDATE jobs SET status='verify' WHERE id=?", (job,))
+    restored = restore_revision(store, job, "output", "restore.txt", 1)
+    assert restored["version"] == 3
+    assert restored["sha256"] == first["sha256"]
+    assert restored["parent_sha256"] == second["sha256"]
+    assert restored["restored_from_version"] == 1
+    assert (root / "workspaces" / job / "restore.txt").read_text(encoding="utf-8") == "Original draft"
+    assert open_snapshot(store, job, "output", "restore.txt", 1)[1].read_text(encoding="utf-8") == "Original draft"
+    assert open_snapshot(store, job, "output", "restore.txt", 2)[1].read_text(encoding="utf-8") == "Revised draft"
+
+
+def test_uploaded_image_is_resized_and_sent_as_untrusted_vision_input(setup_job):
+    from PIL import Image
+    from qbrowser.document_tools import perform_document_action
+    store, job, root = setup_job
+    image_path = root / "photo.png"
+    Image.new("RGB", (2000, 1000), (20, 80, 140)).save(image_path)
+    with image_path.open("rb") as image_file:
+        record_file(store, job, "photo.png", "input", image_file)
+    result = perform_document_action(store, job, {
+        "operation": "view_image", "filename": "photo.png", "role": "input"})
+    assert result["filename"] == "photo.png"
+    assert result["image_uri"].startswith("data:image/jpeg;base64,")
+    encoded = result["image_uri"].split(",", 1)[1]
+    assert len(encoded) < 300_000
 
 
 def test_pdf_generation_preview_and_qa(setup_job):

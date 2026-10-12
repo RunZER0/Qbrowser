@@ -1,7 +1,7 @@
 """Synthetic visual provider contract checks."""
 import unittest
 from qbrowser.native import ModelConfig
-from qbrowser.smoke import probe
+from qbrowser.smoke import probe, probe_desktop
 
 class FakeModel:
     def __init__(self, coordinates=(160,100)):
@@ -26,6 +26,13 @@ class TestSmoke(unittest.TestCase):
     def test_invalid_target_is_rejected(self):
         with self.assertRaisesRegex(RuntimeError,"highlighted"):
             probe(model=FakeModel((0,0)),config=self.config)
+
+    def test_desktop_smoke_reports_missing_display_without_traceback(self):
+        from unittest.mock import patch
+        with patch("qbrowser.native.Desktop", side_effect=KeyError("DISPLAY")):
+            result = probe_desktop()
+        self.assertEqual(result["status"], "blocked")
+        self.assertEqual(result["error"], "No graphical display is available")
 
 if __name__=="__main__":
     unittest.main()

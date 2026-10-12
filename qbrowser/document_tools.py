@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import json
+import base64
+import io
+from pathlib import Path
 
 from qbrowser.artifact_vault import (
     create_output, convert_output, list_revisions, open_snapshot,
@@ -11,7 +14,7 @@ from qbrowser.document_engine import extract_text, inspect_document
 from qbrowser.store import JobStore
 
 
-def perform_document_action(store: JobStore, job_id: str, args: dict) -> str:
+def perform_document_action(store: JobStore, job_id: str, args: dict) -> str | dict:
     if not isinstance(args, dict):
         raise ValueError("Document action requires object")
     op = args.get("operation")
@@ -39,6 +42,19 @@ def perform_document_action(store: JobStore, job_id: str, args: dict) -> str:
         item = convert_output(store, job_id, role, filename, destination, version=version)
         return json.dumps({"converted": item["filename"], "version": item["version"],
                            "quality_issues": item["qa"]})
+    if op == "view_image":
+        if Path(filename).suffix.lower() not in {".png", ".jpg", ".jpeg"}:
+            raise ValueError("view_image supports PNG and JPEG uploads")
+        _, path = open_snapshot(store, job_id, role, filename, version)
+        from PIL import Image
+        with Image.open(path) as image:
+            if image.width * image.height > 40_000_000:
+                raise ValueError("Image is too large to inspect safely")
+            image.thumbnail((1600, 1600), Image.Resampling.LANCZOS)
+            buffer = io.BytesIO()
+            image.convert("RGB").save(buffer, format="JPEG", quality=82, optimize=True)
+        uri = "data:image/jpeg;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
+        return {"filename": filename, "image_uri": uri}
     if op in ("inspect", "read"):
         _, path = open_snapshot(store, job_id, role, filename, version)
         with typed_source(path, filename) as original:

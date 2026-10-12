@@ -4,18 +4,19 @@ from __future__ import annotations
 import html
 from pathlib import Path
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from pydantic import BaseModel, Field
 
 from qbrowser.artifact_vault import (
     create_output, convert_output, get_revision, list_revisions,
-    open_snapshot, purge_expired, record_file, safe_name,
+    open_snapshot, purge_expired, record_file, restore_revision, safe_name,
 )
 from qbrowser.document_engine import inspect_document, preview_png, preview_html
 from qbrowser.store import JobStore
 
 router = APIRouter(prefix="/api/jobs/{job_id}/documents", tags=["Documents"])
+MAX_UPLOAD_REQUEST_BYTES = 101 * 1024 * 1024
 
 
 def _safe(fn):
@@ -44,14 +45,28 @@ class RetentionRequest(BaseModel):
     confirm: bool = False
 
 
+class RestoreDocument(BaseModel):
+    version: int = Field(ge=1)
+
+
 @router.get("")
 def versions(job_id: str, role: str | None = None):
     return _safe(lambda: list_revisions(JobStore(), job_id, role=role))
 
 
 @router.post("/upload/{role}", status_code=201)
-def upload(job_id: str, role: str, file: UploadFile = File(...)):
+def upload(job_id: str, role: str, request: Request, file: UploadFile = File(...)):
     try:
+        content_length = request.headers.get("content-length")
+        if content_length is not None:
+            try:
+                declared_size = int(content_length)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail="Invalid Content-Length") from exc
+            if declared_size < 0:
+                raise HTTPException(status_code=400, detail="Invalid Content-Length")
+            if declared_size > MAX_UPLOAD_REQUEST_BYTES:
+                raise HTTPException(status_code=413, detail="Upload exceeds the 100 MB file limit")
         return _safe(lambda: record_file(JobStore(), job_id, file.filename or "", role, file.file))
     finally:
         file.file.close()
@@ -83,6 +98,13 @@ def retention(job_id: str, request: RetentionRequest):
 def file_versions(job_id: str, role: str, filename: str):
     return _safe(lambda: [x for x in list_revisions(JobStore(), job_id, role=role)
                           if x["filename"] == safe_name(filename)])
+
+
+@router.post("/{role}/{filename}/restore")
+def restore(job_id: str, role: str, filename: str, request: RestoreDocument):
+    return _safe(lambda: restore_revision(
+        JobStore(), job_id, role, filename, request.version,
+    ))
 
 
 from contextlib import contextmanager

@@ -2,11 +2,15 @@
 
 No model credentials, network or visible desktop are necessary.
 """
+import base64
+import io
 import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import MagicMock, patch
 import unittest
+
+from PIL import Image
 
 from qbrowser.native import (
     CompatibleModel, Desktop, ModelConfig, compact, run_native, screen_message,
@@ -17,9 +21,13 @@ from qbrowser.store import JobStore
 class FakeDesktop:
     def __init__(self):
         self.actions = []
+        image = Image.new("RGB", (2, 2), "white")
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+        self.image = "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
 
     def observe(self):
-        return "data:image/jpeg;base64,ZHVtbXk=", (1280, 720)
+        return self.image, (1280, 720)
 
     def perform(self, args):
         self.actions.append(args)
@@ -29,6 +37,24 @@ class FakeDesktop:
 class FakeModel:
     def __init__(self, *calls):
         self.calls = list(calls)
+        if not self.calls or self.calls[0][0] != "assess_task":
+            self.calls.insert(0, ("assess_task", {
+                "feasibility": "ready", "complexity": "low",
+                "requirements": ["Complete the requested task"],
+                "success_criteria": ["The requested outcome is verified"],
+                "ambiguities": [], "assumptions": [],
+                "estimated_steps": 1, "estimated_minutes": 1,
+            }))
+        if (any(name == "computer_action" and args.get("action") not in {"screenshot", "wait"}
+                for name, args in self.calls) and
+                not any(name == "create_or_revise_plan" for name, _args in self.calls)):
+            self.calls[1:1] = [
+                ("create_or_revise_plan", {"items": [{
+                    "key": "planned-action", "title": "Perform the requested action",
+                    "acceptance": "The requested outcome is verified",
+                }]}),
+                ("update_plan_item", {"key": "planned-action", "state": "in_progress"}),
+            ]
         self.histories = []
 
     def ask(self, history):
@@ -63,8 +89,13 @@ class NativeTests(unittest.TestCase):
     def test_action_progress_then_finish(self):
         job = self.claim()
         model = FakeModel(
+            ("create_or_revise_plan", {"items": [{"key": "navigate", "title": "Open the editor",
+                "acceptance": "The editor is visible and ready for use"}]}),
+            ("update_plan_item", {"key": "navigate", "state": "in_progress"}),
             ("record_progress", {"key": "navigate", "state": "in_progress"}),
             ("computer_action", {"action": "click", "x": 5, "y": 6, "impact":"local", "purpose":"Open local editor"}),
+            ("update_plan_item", {"key": "navigate", "state": "done",
+                                   "evidence": "The editor window is visibly open"}),
             ("record_progress", {"key": "navigate", "state": "done"}),
             ("finish_task", {"result": "Opened app", "evidence": "Visible on-screen"}),
         )
@@ -74,10 +105,45 @@ class NativeTests(unittest.TestCase):
         self.assertEqual(desktop.actions[0]["action"], "click")
         self.assertEqual(self.store.checkpoints(job["id"])[0]["state"], "in_progress")
         self.assertIn("Opened app", out["result"])
-        self.assertGreaterEqual(len(self.store.events(job["id"])), 4)
+        self.assertGreaterEqual(len(self.store.events(job["id"])), 8)
+        self.assertEqual(self.store.plan(job["id"])["percent"], 100)
+        self.assertEqual(self.store.action_history(job["id"])[0]["state"], "completed")
         # Screenshots appear only in user turns; models receive the latest screenshot.
         self.assertTrue(any(isinstance(x["content"], list)
                             for x in model.histories[0] if x["role"] == "user"))
+
+    def test_100_actions_keep_plan_memory_and_journal(self):
+        job = self.claim("Complete a long sequence of local tasks")
+        calls = [
+            ("create_or_revise_plan", {"items": [{"key": "sequence", "title": "Complete sequence",
+                "acceptance": "All 100 visible actions are recorded"}]}),
+            ("update_plan_item", {"key": "sequence", "state": "in_progress"}),
+        ]
+        for index in range(100):
+            if index and index % 8 == 0:
+                calls.append(("update_working_memory", {
+                    "summary": f"Completed {index} GUI actions; continue with action {index + 1}.",
+                    "findings": [f"Action {index} was completed"],
+                    "decisions": ["Continue the remaining sequence"], "open_questions": []}))
+            if index and index % 12 == 0:
+                calls.append(("update_plan_item", {"key": "sequence", "state": "in_progress"}))
+            calls.append(("computer_action", {"action": "click", "x": index, "y": index,
+                "impact": "local", "purpose": f"Perform planned action {index + 1}"}))
+        calls.extend([
+            ("update_plan_item", {"key": "sequence", "state": "done",
+                                   "evidence": "The full 100-action sequence is recorded"}),
+            ("finish_task", {"result": "Sequence finished", "evidence": "All actions completed"}),
+        ])
+        model = FakeModel(*calls)
+        config = ModelConfig("zai", "glm-5.3-flash", "fake-key", "https://example.org/v4",
+                             200, 120, 1280)
+        result = run_native(job, self.store, model=model, desktop=FakeDesktop(), config=config)
+        self.assertEqual(result["status"], "verify")
+        self.assertEqual(result["action_count"], 100)
+        self.assertEqual(self.store.plan(job["id"])["percent"], 100)
+        self.assertEqual(len(self.store.action_history(job["id"])), 100)
+        self.assertIn("96 GUI actions", self.store.working_memory(job["id"])["summary"])
+        self.assertLessEqual(len(model.histories[-1]), 20)
 
     def test_unapproved_external_click_never_reaches_desktop(self):
         job = self.claim()
@@ -90,14 +156,15 @@ class NativeTests(unittest.TestCase):
         self.assertIn("Send document", state["pending_approval"])
         resumed = self.store.approve_external(job["id"])
         self.assertEqual(resumed["status"], "queued")
-        self.assertTrue(resumed["external_approved"])
+        self.assertFalse(resumed["external_approved"])
+        self.assertTrue(resumed["approved_action_approval"])
 
     def test_missing_impact_fails_closed(self):
         job = self.claim()
         model = FakeModel(("computer_action", {"action":"click", "x":5, "y":6}))
         desktop = FakeDesktop()
         state = run_native(job, self.store, model=model, desktop=desktop, config=self.config)
-        self.assertEqual(state["status"], "waiting_approval")
+        self.assertEqual(state["status"], "needs_review")
         self.assertFalse(desktop.actions)
 
     def test_destructive_action_requires_manual_handling_even_when_approved(self):
@@ -107,7 +174,7 @@ class NativeTests(unittest.TestCase):
         model = FakeModel(("computer_action", {"action": "click", "x":5, "y":6,
             "impact":"destructive","purpose":"Remove remote folder"}))
         result = run_native(job, self.store, model=model, desktop=desktop, config=self.config)
-        self.assertEqual(result["status"], "waiting_approval")
+        self.assertEqual(result["status"], "needs_review")
         self.assertEqual(desktop.actions, [])
 
     def test_token_limit_stops_before_action(self):
@@ -188,6 +255,20 @@ class NativeTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "DEEPSEEK_API_KEY"):
                 ModelConfig.from_env()
 
+    def test_cost_rates_must_be_paired_and_are_optional(self):
+        base = {"QBROWSER_PROVIDER": "custom", "QBROWSER_MODEL": "vision",
+                "QBROWSER_BASE_URL": "http://127.0.0.1:8080/v1",
+                "QBROWSER_MODEL_API_KEY": "local"}
+        with patch.dict(os.environ, base | {
+                "QBROWSER_INPUT_COST_PER_MILLION_USD": "2.5",
+                "QBROWSER_OUTPUT_COST_PER_MILLION_USD": "7.0"}, clear=True):
+            config = ModelConfig.from_env()
+            self.assertEqual(config.input_cost_per_million_usd, 2.5)
+            self.assertEqual(config.output_cost_per_million_usd, 7.0)
+        with patch.dict(os.environ, base | {"QBROWSER_INPUT_COST_PER_MILLION_USD": "2.5"}, clear=True):
+            with self.assertRaisesRegex(ValueError, "both token cost rates"):
+                ModelConfig.from_env()
+
     def test_compatible_model_handles_tool_calls_and_deepseek_reasoning(self):
         from types import SimpleNamespace
 
@@ -212,7 +293,9 @@ class NativeTests(unittest.TestCase):
         self.assertIn("reasoning_content", turn["assistant"])
         sent = sdk.chat.completions.create.call_args.kwargs
         self.assertEqual(sent["messages"][1]["content"][1]["type"], "image_url")
-        self.assertEqual(sent["tools"][0]["function"]["name"], "computer_action")
+        self.assertIn("computer_action", [tool["function"]["name"] for tool in sent["tools"]])
+        self.assertTrue(turn["usage"]["estimated"])
+        self.assertGreater(turn["usage"]["input"], 0)
 
     def test_invalid_backend_and_non_https_remote_rejected(self):
         with patch.dict(os.environ, {"QBROWSER_PROVIDER": "custom",

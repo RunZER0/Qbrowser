@@ -7,11 +7,17 @@ from __future__ import annotations
 
 import csv
 import io
+import os
 import re
+import shutil
+import tempfile
+import zipfile
 from pathlib import Path
 from typing import Any
 
-SUPPORTED = {".txt", ".md", ".csv", ".pdf", ".docx", ".xlsx", ".pptx", ".png", ".jpg", ".jpeg"}
+from qbrowser.audio import SUPPORTED_AUDIO
+
+SUPPORTED = {".txt", ".md", ".csv", ".pdf", ".docx", ".xlsx", ".pptx", ".png", ".jpg", ".jpeg"} | SUPPORTED_AUDIO
 OFFICE = {".docx", ".xlsx", ".pptx"}
 MAX_TEXT = 2_000_000
 MAX_CELLS = 200_000
@@ -86,11 +92,45 @@ def _create_docx(path: Path, data: dict) -> None:
     doc.save(path)
 
 
+def _normalize_office_package(path: Path) -> None:
+    """Remove clock-dependent ZIP metadata so identical inputs have identical hashes."""
+    fd, temporary = tempfile.mkstemp(prefix=".normalized-", suffix=path.suffix,
+                                     dir=path.parent)
+    os.close(fd)
+    try:
+        with zipfile.ZipFile(path, "r") as source, zipfile.ZipFile(
+            temporary, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6
+        ) as normalized:
+            for member in source.infolist():
+                info = zipfile.ZipInfo(member.filename, date_time=(2000, 1, 1, 0, 0, 0))
+                info.compress_type = member.compress_type
+                info.create_system = member.create_system
+                info.external_attr = member.external_attr
+                info.internal_attr = member.internal_attr
+                info.comment = member.comment
+                with source.open(member, "r") as reader:
+                    if member.filename == "docProps/core.xml":
+                        content = reader.read()
+                        content = re.sub(
+                            rb"(<(?:[\w.-]+:)?modified\b[^>]*>).*?(</(?:[\w.-]+:)?modified>)",
+                            rb"\g<1>2000-01-01T00:00:00Z\g<2>", content,
+                        )
+                        normalized.writestr(info, content)
+                    else:
+                        with normalized.open(info, "w") as writer:
+                            shutil.copyfileobj(reader, writer, length=1024 * 1024)
+        os.replace(temporary, path)
+    except Exception:
+        Path(temporary).unlink(missing_ok=True)
+        raise
+
+
 def _create_pdf(path: Path, data: dict) -> None:
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+    from reportlab.pdfgen.canvas import Canvas
     from xml.sax.saxutils import escape
 
     styles = getSampleStyleSheet()
@@ -124,14 +164,22 @@ def _create_pdf(path: Path, data: dict) -> None:
                 story.append(Paragraph(text or " ", styles["QBody"]))
     doc = SimpleDocTemplate(str(path), pagesize=A4, rightMargin=54, leftMargin=54,
                             topMargin=54, bottomMargin=54, title=title or "Qbrowser")
-    doc.build(story or [Paragraph(" ", styles["QBody"])])
+    def invariant_canvas(*args, **kwargs):
+        kwargs["invariant"] = 1
+        return Canvas(*args, **kwargs)
+
+    doc.build(story or [Paragraph(" ", styles["QBody"])],
+              canvasmaker=invariant_canvas)
 
 
 def _create_xlsx(path: Path, data: dict) -> None:
+    from datetime import datetime
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill
     from openpyxl.utils import get_column_letter
     wb = Workbook()
+    wb.properties.created = datetime(2000, 1, 1)
+    wb.properties.modified = datetime(2000, 1, 1)
     sheets = data.get("sheets", [])
     if not isinstance(sheets, list) or not sheets or len(sheets) > 30:
         raise ValueError("sheets must contain 1-30 sheets")
@@ -225,11 +273,16 @@ def create_document(path: Path, data: dict) -> None:
         path.write_text(body, encoding="utf-8")
     else:
         raise ValueError(f"Document creation unsupported for {suffix}")
+    if suffix in OFFICE:
+        _normalize_office_package(path)
 
 
 def extract_text(path: Path, *, limit: int = MAX_TEXT) -> str:
     """Parse normal document formats with maintained libraries and bound output."""
     suffix = path.suffix.lower()
+    if suffix in SUPPORTED_AUDIO:
+        from qbrowser.audio import transcribe_audio
+        return transcribe_audio(path, limit=limit)
     chunks: list[str] = []
     total = 0
 
@@ -325,6 +378,10 @@ def inspect_document(path: Path) -> dict:
         with Image.open(path) as im:
             info["width"], info["height"] = im.size
             info["mode"] = im.mode
+        return info
+    if suffix in SUPPORTED_AUDIO:
+        info["bytes"] = path.stat().st_size
+        info["transcription"] = "available when an explicit transcription endpoint and key are configured"
         return info
     body = extract_text(path)
     info["characters"] = len(body)

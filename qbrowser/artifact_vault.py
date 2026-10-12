@@ -28,6 +28,10 @@ CONTENT_TYPES = {
     ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     ".pdf": "application/pdf", ".png": "image/png",
     ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+    ".flac": "audio/flac", ".m4a": "audio/mp4", ".mp3": "audio/mpeg",
+    ".mp4": "audio/mp4", ".mpeg": "audio/mpeg", ".mpga": "audio/mpeg",
+    ".ogg": "audio/ogg", ".oga": "audio/ogg", ".wav": "audio/wav",
+    ".webm": "audio/webm",
 }
 OOXML_REQUIRED = {
     ".docx": "word/document.xml",
@@ -74,6 +78,8 @@ def _schema(store: JobStore):
             CREATE INDEX IF NOT EXISTS doc_revisions_job ON
                 document_revisions(job_id,role,filename,version);
         """)
+        db.execute("INSERT OR IGNORE INTO schema_migrations(version,name,applied_at) VALUES(2,?,?)",
+                   ("immutable-document-vault", utcnow()))
 
 
 def _vault_path(job_id: str, digest: str) -> Path:
@@ -102,6 +108,25 @@ def validate_file(path: Path, filename: str) -> dict:
     elif extension in (".jpg", ".jpeg"):
         if not header.startswith(b"\xff\xd8\xff"):
             raise ValueError("File is not a valid JPEG")
+    elif extension == ".wav":
+        if len(header) < 12 or header[:4] != b"RIFF" or header[8:12] != b"WAVE":
+            raise ValueError("File is not a valid WAV audio container")
+    elif extension == ".flac":
+        if not header.startswith(b"fLaC"):
+            raise ValueError("File is not a valid FLAC stream")
+    elif extension in {".m4a", ".mp4"}:
+        if len(header) < 12 or header[4:8] != b"ftyp":
+            raise ValueError("File is not a valid MP4 audio container")
+    elif extension in {".ogg", ".oga"}:
+        if not header.startswith(b"OggS"):
+            raise ValueError("File is not a valid Ogg audio container")
+    elif extension == ".webm":
+        if not header.startswith(b"\x1aE\xdf\xa3"):
+            raise ValueError("File is not a valid WebM container")
+    elif extension in {".mp3", ".mpeg", ".mpga"}:
+        frame_sync = len(header) >= 2 and header[0] == 0xFF and header[1] & 0xE0 == 0xE0
+        if not header.startswith(b"ID3") and not frame_sync:
+            raise ValueError("File is not a valid MPEG audio stream")
     elif extension in OOXML_REQUIRED:
         if not zipfile.is_zipfile(path):
             raise ValueError("Office document must be a ZIP package")
@@ -307,6 +332,23 @@ def open_snapshot(store: JobStore, job_id: str, role: str,
     if digest != item["sha256"] or size != item["bytes"]:
         raise ValueError("Vault integrity check failed")
     return item, path
+
+
+def restore_revision(store: JobStore, job_id: str, role: str,
+                     filename: str, version: int) -> dict:
+    """Restore an immutable revision as a new latest version and working copy."""
+    job = store.get(job_id)
+    if job["status"] in {"queued", "running", "waiting"}:
+        raise ValueError("Pause or finish the task before restoring a document")
+    source_item, source = open_snapshot(store, job_id, role, filename, version)
+    with source.open("rb") as stream:
+        restored = record_file(store, job_id, filename, role, stream)
+    with store._connection() as db:
+        JobStore._event(db, job_id, "artifact_restored", role=role,
+                        filename=filename, source_version=version,
+                        restored_version=restored["version"], sha256=source_item["sha256"])
+    restored["restored_from_version"] = version
+    return restored
 
 
 def create_output(store: JobStore, job_id: str, filename: str, data: dict) -> dict:

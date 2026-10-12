@@ -3,20 +3,57 @@ from __future__ import annotations
 
 import io
 import os
+import asyncio
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
-
-from fastapi.testclient import TestClient
+from httpx import ASGITransport, AsyncClient
 
 from qbrowser.store import JobStore
 from qbrowser.web import app
+
+
+async def _direct_call(function, *args, **kwargs):
+    return function(*args, **kwargs)
+
+
+class InProcessClient:
+    """ASGI client that keeps sync document routes in-process for restricted sandboxes."""
+    def __init__(self, application):
+        self.application = application
+        self._thread_patch = patch("fastapi.routing.run_in_threadpool", new=_direct_call)
+        self._file_thread_patch = patch("anyio.to_thread.run_sync", new=_direct_call)
+
+    def __enter__(self):
+        self._thread_patch.start()
+        self._file_thread_patch.start()
+        return self
+
+    def __exit__(self, *exc):
+        self._file_thread_patch.stop()
+        self._thread_patch.stop()
+
+    def _request(self, method, path, **kwargs):
+        async def send():
+            async with AsyncClient(transport=ASGITransport(app=self.application),
+                                   base_url="http://test") as client:
+                return await client.request(method, path, **kwargs)
+        return asyncio.run(send())
+
+    def get(self, path, **kwargs):
+        return self._request("GET", path, **kwargs)
+
+    def post(self, path, **kwargs):
+        return self._request("POST", path, **kwargs)
+
+    def put(self, path, **kwargs):
+        return self._request("PUT", path, **kwargs)
 
 
 def test_uploaded_file_lifecycle_and_security():
     with TemporaryDirectory() as directory, patch.dict(os.environ, {
         "QBROWSER_HOME": directory, "QBROWSER_API_TOKEN": "private-token",
     }):
-        with TestClient(app) as client:
+        with InProcessClient(app) as client:
             headers = {"Authorization": "Bearer private-token"}
             job = client.post("/api/jobs", json={"instruction": "Write paper"},
                               headers=headers).json()
@@ -46,7 +83,7 @@ def test_generated_file_preview_review_versions():
     with TemporaryDirectory() as directory, patch.dict(os.environ, {
         "QBROWSER_HOME": directory, "QBROWSER_API_TOKEN": "secret",
     }):
-        with TestClient(app) as client:
+        with InProcessClient(app) as client:
             headers = {"Authorization": "Bearer secret"}
             job = client.post("/api/jobs", json={"instruction": "Create report"},
                               headers=headers).json()
@@ -87,11 +124,39 @@ def test_generated_file_preview_review_versions():
             assert "Final version." in txt.text
 
 
+def test_restore_route_requires_auth_and_preserves_all_versions():
+    with TemporaryDirectory() as directory, patch.dict(os.environ, {
+        "QBROWSER_HOME": directory, "QBROWSER_API_TOKEN": "secret",
+    }):
+        with InProcessClient(app) as client:
+            headers = {"Authorization": "Bearer secret"}
+            job = client.post("/api/jobs", json={"instruction": "Restore a draft"},
+                              headers=headers).json()
+            root = f"/api/jobs/{job['id']}/documents"
+            for text in ("Original draft", "Revised draft"):
+                response = client.post(root + "/generate", headers=headers, json={
+                    "filename": "restore.txt", "data": {"text": text},
+                })
+                assert response.status_code == 201, response.text
+            with JobStore()._connection() as db:
+                db.execute("UPDATE jobs SET status='verify' WHERE id=?", (job["id"],))
+            url = root + "/output/restore.txt/restore"
+            assert client.post(url, json={"version": 1}).status_code == 401
+            restored = client.post(url, headers=headers, json={"version": 1})
+            assert restored.status_code == 200, restored.text
+            assert restored.json()["version"] == 3
+            assert restored.json()["restored_from_version"] == 1
+            versions = client.get(root + "/output/restore.txt/versions", headers=headers).json()
+            assert [x["version"] for x in versions] == [1, 2, 3]
+            latest = client.get(root + "/output/restore.txt/download", headers=headers)
+            assert latest.text == "Original draft"
+
+
 def test_pdf_preview_returns_png_and_requires_auth():
     with TemporaryDirectory() as directory, patch.dict(os.environ, {
         "QBROWSER_HOME": directory, "QBROWSER_API_TOKEN": "secret",
     }):
-        with TestClient(app) as client:
+        with InProcessClient(app) as client:
             headers = {"Authorization": "Bearer secret"}
             job = client.post("/api/jobs", json={"instruction": "Create PDF"},
                               headers=headers).json()
@@ -144,11 +209,25 @@ def test_native_agent_produces_versioned_word_file_without_gui_clicks():
         def ask(self, messages):
             self.turns += 1
             if self.turns == 1:
+                op, args = "assess_task", {"feasibility": "ready", "complexity": "low",
+                    "requirements": ["Create a Word document"],
+                    "success_criteria": ["The versioned output contains the requested content."],
+                    "ambiguities": [], "assumptions": [], "estimated_steps": 5,
+                    "estimated_minutes": 1}
+            elif self.turns == 2:
+                op, args = "create_or_revise_plan", {"items": [{
+                    "key": "write", "title": "Create the Word file",
+                    "acceptance": "The versioned output contains the requested content.",
+                }]}
+            elif self.turns == 3:
                 op, args = "document_action", {"operation": "create",
                     "filename": "final.docx",
                     "data": {"title": "Result", "blocks": [
                         {"type": "paragraph", "text": "A real Word file produced by the agent."}
                     ]}}
+            elif self.turns == 4:
+                op, args = "update_plan_item", {"key": "write", "state": "done",
+                                                 "evidence": "Saved the generated Word artifact."}
             else:
                 op, args = "finish_task", {"result": "Word file produced",
                                            "evidence": "Saved via managed document tool"}
@@ -179,7 +258,7 @@ def test_upload_request_content_length_guard():
     with TemporaryDirectory() as directory, patch.dict(os.environ, {
         "QBROWSER_HOME": directory, "QBROWSER_API_TOKEN": "secret",
     }):
-        with TestClient(app) as client:
+        with InProcessClient(app) as client:
             headers = {"Authorization": "Bearer secret"}
             job = client.post("/api/jobs", json={"instruction": "Test large upload"},
                               headers=headers).json()
@@ -195,7 +274,7 @@ def test_semantic_office_preview_escapes_untrusted_html():
     with TemporaryDirectory() as directory, patch.dict(os.environ, {
         "QBROWSER_HOME": directory, "QBROWSER_API_TOKEN": "secret",
     }):
-        with TestClient(app) as client:
+        with InProcessClient(app) as client:
             headers = {"Authorization": "Bearer secret"}
             job = client.post("/api/jobs", json={"instruction": "Preview safe HTML"},
                               headers=headers).json()

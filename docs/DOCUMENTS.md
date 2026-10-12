@@ -71,6 +71,7 @@ PDF generation uses ReportLab and does not preserve complex DOCX or PPTX layout.
     qbrowser convert JOB_ID output report.docx report.md
     qbrowser convert JOB_ID output budget.xlsx budget.csv
     qbrowser convert JOB_ID input source.csv source.xlsx
+    qbrowser restore JOB_ID output answer.docx --version 1
 
 Supported conversions:
 - PDF, DOCX, XLSX, PPTX and CSV → TXT or Markdown (plain extracted text; formatting is not preserved).
@@ -89,11 +90,11 @@ Each saved artifact stores:
 
 Identical content is deduplicated. Changing a document creates a new immutable revision, so the previous text and file can be retrieved. Output files saved through ordinary GUI tools are synchronized on task completion, at native agent milestones marked done, and periodically after GUI actions.
 
-Latest and historical versions are available via `qbrowser versions JOB_ID` and the Documents panel. Downloads always target an immutable snapshot, authenticated by the local API token.
+Latest and historical versions are available via `qbrowser versions JOB_ID` and the Documents panel. Downloads always target an immutable snapshot, authenticated by the local API token. Restore a historical version with `qbrowser restore JOB_ID output report.docx --version 1`; Qbrowser writes it to the job workspace as a new latest revision, preserving the old and intervening versions. Restore is blocked while a job is queued, waiting, or actively running.
 
 ## Preview, review and quality controls
 
-The dashboard supports preview, download and QA review of each revision. PDFs render as genuine PNG previews; images render as thumbnails. Word, Excel and PowerPoint files use sanitized semantic HTML previews (headings, tables and slide text); text files use escaped previews. These previews do not reproduce exact Office page layout.
+The dashboard supports preview, download, restore and QA review of each revision. Restoring an older revision creates a new latest version and preserves the intervening history. PDFs render as genuine PNG previews; images render as thumbnails. Word, Excel and PowerPoint files use sanitized semantic HTML previews (headings, tables and slide text); text files use escaped previews. These previews do not reproduce exact Office page layout.
 
 `qbrowser document-qa JOB_ID input instructions.pdf` reports metadata and issues. Heuristics include empty files, abnormal Word font sizes and narrow page margins, text box overlap and out-of-slide shapes in PowerPoint, workbook dimensions, in-text author/year citation consistency, missing references headings and citation/reference mismatches.
 
@@ -106,6 +107,7 @@ These checks cannot certify academic accuracy, source existence, plagiarism, gra
 - `POST /api/jobs/{id}/documents/generate` creates an output.
 - `POST /api/jobs/{id}/documents/convert` converts an existing version.
 - `GET /api/jobs/{id}/documents/{role}/{filename}/versions` lists version history.
+- `POST /api/jobs/{id}/documents/{role}/{filename}/restore` with `{"version":1}` restores a historical version as a new latest revision.
 - `GET /api/jobs/{id}/documents/{role}/{filename}/review` performs QA and metadata extraction.
 - `GET /api/jobs/{id}/documents/{role}/{filename}/preview?version=1` previews an immutable version.
 - `GET /api/jobs/{id}/documents/{role}/{filename}/download?version=1` downloads with `Content-Disposition: attachment`.
@@ -128,3 +130,9 @@ Cleanup removes expired immutable bytes and matching working files, while preser
 For opt-in scheduled cleanup, set `QBROWSER_ARTIFACT_RETENTION_DAYS=90` in `.env`. Setting `0` (the default) disables automatic deletion. Do not enable this until you have backed up output files and decided on a policy for the clients' documents.
 
 **Privacy:** model inference may transmit screenshot contents and selected extracted document content to the configured external provider. Qbrowser vault bytes are not encrypted at rest; use an encrypted user volume or OS account isolation for sensitive work. Retention removes bytes but is not forensic secure erasure on SSDs.
+
+## Audio inputs
+
+WAV, MP3, M4A/MP4, MPEG/MPGA, Ogg/OGA, FLAC and WebM files can be uploaded as job inputs. Upload and inspection validate the container and do not send audio to a provider. Transcription occurs only when the agent explicitly reads the file or converts it to text. Configure `QBROWSER_TRANSCRIPTION_BASE_URL`, `QBROWSER_TRANSCRIPTION_MODEL` and `QBROWSER_TRANSCRIPTION_API_KEY`; the default OpenAI-compatible model name is `whisper-1`. The endpoint must be HTTPS or localhost. Files are capped at 25 MB for one transcription request; larger audio must be split outside Qbrowser. The configured service receives the audio bytes, and returned transcripts are untrusted source content.
+
+Transcribed text is untrusted input, like PDF and webpage text. It can include instructions that Qbrowser must not treat as operating policy.

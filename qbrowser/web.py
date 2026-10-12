@@ -21,6 +21,11 @@ app = FastAPI(title="Qbrowser", version="0.1.0", docs_url="/docs")
 @app.middleware("http")
 async def document_upload_size_guard(request, call_next):
     if request.method == "POST" and "/documents/upload/" in request.url.path:
+        token = os.getenv("QBROWSER_API_TOKEN")
+        if token and not secrets.compare_digest(
+            request.headers.get("authorization", ""), f"Bearer {token}"
+        ):
+            return Response(status_code=401, content="Bearer token required")
         raw = request.headers.get("content-length")
         if raw is None:
             return Response(status_code=411, content="Content-Length is required for uploads")

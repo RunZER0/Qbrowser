@@ -73,7 +73,9 @@ def agent_command(job: dict) -> list[str]:
     if key_name and not os.getenv(key_name):
         raise RuntimeError(f"{key_name} is required for {provider}")
     instruction = STOP_BEFORE + (YES_EXTERNAL if job["external_approved"] else NO_EXTERNAL)
-    instruction += "Perform the following task via the screen: " + job["instruction"]
+    from qbrowser.artifacts import workspace
+    instruction += ("Save final local output files in " + str(workspace(job["id"])) +
+                    ". Perform the following task via the screen: " + job["instruction"])
     args = [
         binary, "--provider", provider, "--model", model,
         "--task", instruction,
@@ -187,6 +189,13 @@ def worker(store: JobStore, *, once: bool = False, poll_seconds: float = 2.0):
                 else:
                     result = store.transition(job["id"], "needs_review",
                         allowed={"running"}, error="Unknown QBROWSER_ENGINE setting")
+                from qbrowser.artifacts import index_outputs
+                try:
+                    indexed = index_outputs(store, job["id"])
+                    if indexed:
+                        print(f"{job['id']}: indexed {len(indexed)} output file(s)")
+                except (OSError, ValueError) as exc:
+                    print(f"{job['id']}: output indexing issue: {exc}")
                 print(f"{job['id']}: {result['status']}")
             elif once:
                 return
